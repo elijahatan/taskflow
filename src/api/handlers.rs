@@ -1,36 +1,37 @@
 use log::warn;
 
-use crate::db::task_repo::TaskRepository;
 use crate::db::project_repo::ProjectRepository;
+use crate::db::task_repo::TaskRepository;
 use crate::db::Database;
 use crate::models::project::CreateProjectRequest;
-use crate::models::task::{CreateTaskRequest, TaskFilter, TaskPriority, TaskStatus, UpdateTaskRequest};
+use crate::models::task::{
+    CreateTaskRequest, TaskFilter, TaskPriority, TaskStatus, UpdateTaskRequest,
+};
 
 use super::router::ApiResponse;
 
+#[derive(serde::Deserialize)]
+struct DependencyRequest {
+    depends_on_task_id: String,
+}
 
 pub fn list_tasks(query: &str, db: &Database) -> ApiResponse {
     let mut filter = TaskFilter::default();
 
-  
     for pair in query.split('&').filter(|s| !s.is_empty()) {
         let mut kv = pair.splitn(2, '=');
         let key = kv.next().unwrap_or("").trim();
         let val = kv.next().unwrap_or("").trim();
 
         match key {
-            "status" => {
-                match TaskStatus::from_str(val) {
-                    Ok(s) => filter.status = Some(s),
-                    Err(e) => return ApiResponse::bad_request(&e.to_string()),
-                }
-            }
-            "priority" => {
-                match TaskPriority::from_str(val) {
-                    Ok(p) => filter.priority = Some(p),
-                    Err(e) => return ApiResponse::bad_request(&e.to_string()),
-                }
-            }
+            "status" => match TaskStatus::from_str(val) {
+                Ok(s) => filter.status = Some(s),
+                Err(e) => return ApiResponse::bad_request(&e.to_string()),
+            },
+            "priority" => match TaskPriority::from_str(val) {
+                Ok(p) => filter.priority = Some(p),
+                Err(e) => return ApiResponse::bad_request(&e.to_string()),
+            },
             "project_id" => filter.project_id = Some(val.to_string()),
             "assignee" => filter.assignee = Some(val.to_string()),
             "tag" => filter.tag = Some(val.to_string()),
@@ -131,6 +132,32 @@ pub fn complete_task(id: &str, db: &Database) -> ApiResponse {
     }
 }
 
+pub fn add_dependency(id: &str, body: &str, db: &Database) -> ApiResponse {
+    let req: DependencyRequest = match serde_json::from_str(body) {
+        Ok(r) => r,
+        Err(e) => return ApiResponse::bad_request(&format!("Invalid JSON: {}", e)),
+    };
+
+    let repo = TaskRepository::new(db);
+    match repo.add_dependency(id, &req.depends_on_task_id) {
+        Ok(task) => match serde_json::to_string(&task) {
+            Ok(json) => ApiResponse::created(json),
+            Err(e) => ApiResponse::internal_error(&e.to_string()),
+        },
+        Err(e) => ApiResponse::bad_request(&e.to_string()),
+    }
+}
+
+pub fn remove_dependency(id: &str, depends_on_id: &str, db: &Database) -> ApiResponse {
+    let repo = TaskRepository::new(db);
+    match repo.remove_dependency(id, depends_on_id) {
+        Ok(task) => match serde_json::to_string(&task) {
+            Ok(json) => ApiResponse::ok(json),
+            Err(e) => ApiResponse::internal_error(&e.to_string()),
+        },
+        Err(e) => ApiResponse::bad_request(&e.to_string()),
+    }
+}
 
 pub fn list_projects(db: &Database) -> ApiResponse {
     let repo = ProjectRepository::new(db);
@@ -168,22 +195,24 @@ pub fn delete_project(id: &str, db: &Database) -> ApiResponse {
     }
 }
 
-
 pub fn get_stats(db: &Database) -> ApiResponse {
     let repo = TaskRepository::new(db);
     match repo.statistics() {
         Ok(stats) => {
             let json = format!(
                 r#"{{"total":{},"todo":{},"in_progress":{},"done":{},"overdue":{},"critical":{}}}"#,
-                stats.total, stats.todo, stats.in_progress, stats.done, stats.overdue, stats.critical
+                stats.total,
+                stats.todo,
+                stats.in_progress,
+                stats.done,
+                stats.overdue,
+                stats.critical
             );
             ApiResponse::ok(json)
         }
         Err(e) => ApiResponse::internal_error(&e.to_string()),
     }
 }
-
-
 
 fn url_decode(s: &str) -> String {
     s.replace('+', " ")

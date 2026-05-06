@@ -21,6 +21,8 @@ COMMANDS:
   add       Add a new task
   list      List tasks  (alias: ls)
   show      Show task detail
+  block     Add a task dependency
+  unblock   Remove a task dependency
   done      Mark a task as done
   update    Update task fields
   delete    Delete a task  (alias: rm)
@@ -55,8 +57,20 @@ pub enum Command {
         format: String,
         limit: Option<u32>,
     },
-    Show { id: String },
-    Done { id: String },
+    Show {
+        id: String,
+    },
+    Block {
+        id: String,
+        on: String,
+    },
+    Unblock {
+        id: String,
+        on: String,
+    },
+    Done {
+        id: String,
+    },
     Update {
         id: String,
         title: Option<String>,
@@ -66,12 +80,25 @@ pub enum Command {
         tags: Option<String>,
         due: Option<String>,
     },
-    Delete { id: String, yes: bool },
-    ProjectAdd { name: String, description: Option<String>, color: Option<String> },
+    Delete {
+        id: String,
+        yes: bool,
+    },
+    ProjectAdd {
+        name: String,
+        description: Option<String>,
+        color: Option<String>,
+    },
     ProjectList,
-    ProjectDelete { id: String, yes: bool },
+    ProjectDelete {
+        id: String,
+        yes: bool,
+    },
     Stats,
-    Serve { host: String, port: u16 },
+    Serve {
+        host: String,
+        port: u16,
+    },
 }
 
 pub fn parse_args() -> Result<(GlobalOpts, Command)> {
@@ -124,17 +151,43 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
         },
 
         "show" => {
-            let id: String = args.free_from_str().map_err(|_| anyhow!("show requires a task ID"))?;
+            let id: String = args
+                .free_from_str()
+                .map_err(|_| anyhow!("show requires a task ID"))?;
             Command::Show { id }
         }
 
+        "block" => {
+            let id: String = args
+                .free_from_str()
+                .map_err(|_| anyhow!("block requires a task ID"))?;
+            let on: String = args
+                .opt_value_from_str("--on")?
+                .ok_or_else(|| anyhow!("block requires --on <task-id>"))?;
+            Command::Block { id, on }
+        }
+
+        "unblock" => {
+            let id: String = args
+                .free_from_str()
+                .map_err(|_| anyhow!("unblock requires a task ID"))?;
+            let on: String = args
+                .opt_value_from_str("--on")?
+                .ok_or_else(|| anyhow!("unblock requires --on <task-id>"))?;
+            Command::Unblock { id, on }
+        }
+
         "done" => {
-            let id: String = args.free_from_str().map_err(|_| anyhow!("done requires a task ID"))?;
+            let id: String = args
+                .free_from_str()
+                .map_err(|_| anyhow!("done requires a task ID"))?;
             Command::Done { id }
         }
 
         "update" => {
-            let id: String = args.free_from_str().map_err(|_| anyhow!("update requires a task ID"))?;
+            let id: String = args
+                .free_from_str()
+                .map_err(|_| anyhow!("update requires a task ID"))?;
             Command::Update {
                 id,
                 title: args.opt_value_from_str("--title")?,
@@ -147,15 +200,22 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
         }
 
         "delete" | "rm" => {
-            let id: String = args.free_from_str().map_err(|_| anyhow!("delete requires a task ID"))?;
-            Command::Delete { id, yes: args.contains(["-y", "--yes"]) }
+            let id: String = args
+                .free_from_str()
+                .map_err(|_| anyhow!("delete requires a task ID"))?;
+            Command::Delete {
+                id,
+                yes: args.contains(["-y", "--yes"]),
+            }
         }
 
         "project" => {
             let sub = args.subcommand()?.unwrap_or_default();
             match sub.as_str() {
                 "add" => {
-                    let name: String = args.free_from_str().map_err(|_| anyhow!("project add requires a name"))?;
+                    let name: String = args
+                        .free_from_str()
+                        .map_err(|_| anyhow!("project add requires a name"))?;
                     Command::ProjectAdd {
                         name,
                         description: args.opt_value_from_str(["-d", "--description"])?,
@@ -164,10 +224,20 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
                 }
                 "list" | "ls" => Command::ProjectList,
                 "delete" | "rm" => {
-                    let id: String = args.free_from_str().map_err(|_| anyhow!("project delete requires an ID"))?;
-                    Command::ProjectDelete { id, yes: args.contains(["-y", "--yes"]) }
+                    let id: String = args
+                        .free_from_str()
+                        .map_err(|_| anyhow!("project delete requires an ID"))?;
+                    Command::ProjectDelete {
+                        id,
+                        yes: args.contains(["-y", "--yes"]),
+                    }
                 }
-                other => return Err(anyhow!("Unknown project subcommand: '{}'. Use: add, list, delete", other)),
+                other => {
+                    return Err(anyhow!(
+                        "Unknown project subcommand: '{}'. Use: add, list, delete",
+                        other
+                    ))
+                }
             }
         }
 
@@ -200,21 +270,62 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
 
 pub async fn run(cmd: Command, db: &Database) -> Result<()> {
     match cmd {
-        Command::Add { title, description, priority, project, assignee, tags, due } => {
-            commands::task_add(db, title, description, priority, project, assignee, tags, due).await
+        Command::Add {
+            title,
+            description,
+            priority,
+            project,
+            assignee,
+            tags,
+            due,
+        } => {
+            commands::task_add(
+                db,
+                title,
+                description,
+                priority,
+                project,
+                assignee,
+                tags,
+                due,
+            )
+            .await
         }
-        Command::List { status, priority, project, assignee, tag, search, overdue, format, limit } => {
-            commands::task_list(db, status, priority, project, assignee, tag, search, overdue, &format, limit).await
+        Command::List {
+            status,
+            priority,
+            project,
+            assignee,
+            tag,
+            search,
+            overdue,
+            format,
+            limit,
+        } => {
+            commands::task_list(
+                db, status, priority, project, assignee, tag, search, overdue, &format, limit,
+            )
+            .await
         }
         Command::Show { id } => commands::task_show(db, &id).await,
+        Command::Block { id, on } => commands::task_block(db, &id, &on).await,
+        Command::Unblock { id, on } => commands::task_unblock(db, &id, &on).await,
         Command::Done { id } => commands::task_done(db, &id).await,
-        Command::Update { id, title, status, priority, assignee, tags, due } => {
-            commands::task_update(db, &id, title, status, priority, assignee, tags, due).await
-        }
+        Command::Update {
+            id,
+            title,
+            status,
+            priority,
+            assignee,
+            tags,
+            due,
+        } => commands::task_update(db, &id, title, status, priority, assignee, tags, due).await,
         Command::Delete { id, yes } => commands::task_delete(db, &id, yes).await,
-        Command::ProjectAdd { name, description, color } => {
-            commands::project_add(db, name, description, color).await
-        }
+        Command::ProjectAdd {
+            name,
+            description,
+            color,
+        } => commands::project_add(db, name, description, color).await,
         Command::ProjectList => commands::project_list(db).await,
         Command::ProjectDelete { id, yes } => commands::project_delete(db, &id, yes).await,
         Command::Stats => commands::stats(db).await,

@@ -3,7 +3,6 @@ use prettytable::{format, row, Cell, Row, Table};
 
 use crate::models::task::{Task, TaskPriority, TaskStatus};
 
-
 pub fn priority_colored(p: &TaskPriority) -> ColoredString {
     match p {
         TaskPriority::Critical => "CRITICAL".red().bold(),
@@ -12,7 +11,6 @@ pub fn priority_colored(p: &TaskPriority) -> ColoredString {
         TaskPriority::Low => "low".dimmed(),
     }
 }
-
 
 pub fn status_colored(s: &TaskStatus) -> ColoredString {
     match s {
@@ -23,7 +21,6 @@ pub fn status_colored(s: &TaskStatus) -> ColoredString {
         TaskStatus::Todo => "todo".normal(),
     }
 }
-
 
 pub fn render_task_table(tasks: &[Task]) {
     if tasks.is_empty() {
@@ -86,12 +83,8 @@ pub fn render_task_table(tasks: &[Task]) {
     }
 
     table.printstd();
-    println!(
-        "\n  {} task(s) shown",
-        tasks.len().to_string().bold()
-    );
+    println!("\n  {} task(s) shown", tasks.len().to_string().bold());
 }
-
 
 pub fn render_task_detail(task: &Task) {
     println!();
@@ -99,8 +92,16 @@ pub fn render_task_detail(task: &Task) {
     println!("  {} {}", "Task:".bold(), task.title.bold().white());
     println!("{}", "━".repeat(60).dimmed());
     println!("  {:12} {}", "ID:".dimmed(), task.id);
-    println!("  {:12} {}", "Status:".dimmed(), status_colored(&task.status));
-    println!("  {:12} {}", "Priority:".dimmed(), priority_colored(&task.priority));
+    println!(
+        "  {:12} {}",
+        "Status:".dimmed(),
+        status_colored(&task.status)
+    );
+    println!(
+        "  {:12} {}",
+        "Priority:".dimmed(),
+        priority_colored(&task.priority)
+    );
 
     if let Some(desc) = &task.description {
         println!("  {:12} {}", "Description:".dimmed(), desc);
@@ -112,12 +113,39 @@ pub fn render_task_detail(task: &Task) {
         println!("  {:12} {}", "Assignee:".dimmed(), assignee);
     }
     if !task.tags.is_empty() {
-        println!("  {:12} {}", "Tags:".dimmed(), task.tags.join(", ").cyan().to_string());
+        println!(
+            "  {:12} {}",
+            "Tags:".dimmed(),
+            task.tags.join(", ").cyan().to_string()
+        );
+    }
+    if !task.blocked_by.is_empty() {
+        let deps = task
+            .blocked_by
+            .iter()
+            .map(|id| id.chars().take(8).collect::<String>())
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  {:12} {}", "Blocked by:".dimmed(), deps.red());
+    }
+    if !task.blocks.is_empty() {
+        let dependents = task
+            .blocks
+            .iter()
+            .map(|id| id.chars().take(8).collect::<String>())
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  {:12} {}", "Blocks:".dimmed(), dependents.yellow());
     }
     if let Some(due) = &task.due_date {
         let due_str = due.format("%Y-%m-%d %H:%M UTC").to_string();
         if task.is_overdue() {
-            println!("  {:12} {} {}", "Due:".dimmed(), due_str.red(), "⚠ OVERDUE".red().bold());
+            println!(
+                "  {:12} {} {}",
+                "Due:".dimmed(),
+                due_str.red(),
+                "⚠ OVERDUE".red().bold()
+            );
         } else if let Some(days) = task.days_until_due() {
             println!("  {:12} {} (in {} days)", "Due:".dimmed(), due_str, days);
         } else {
@@ -125,10 +153,22 @@ pub fn render_task_detail(task: &Task) {
         }
     }
     if let Some(completed) = &task.completed_at {
-        println!("  {:12} {}", "Completed:".dimmed(), completed.format("%Y-%m-%d %H:%M UTC"));
+        println!(
+            "  {:12} {}",
+            "Completed:".dimmed(),
+            completed.format("%Y-%m-%d %H:%M UTC")
+        );
     }
-    println!("  {:12} {}", "Created:".dimmed(), task.created_at.format("%Y-%m-%d %H:%M UTC"));
-    println!("  {:12} {}", "Updated:".dimmed(), task.updated_at.format("%Y-%m-%d %H:%M UTC"));
+    println!(
+        "  {:12} {}",
+        "Created:".dimmed(),
+        task.created_at.format("%Y-%m-%d %H:%M UTC")
+    );
+    println!(
+        "  {:12} {}",
+        "Updated:".dimmed(),
+        task.updated_at.format("%Y-%m-%d %H:%M UTC")
+    );
     println!("{}", "━".repeat(60).dimmed());
     println!();
 }
@@ -151,13 +191,24 @@ pub fn render_stats(stats: &crate::db::task_repo::TaskStatistics) {
     println!();
     println!("  {:>6}  total tasks", stats.total.to_string().bold());
     println!("  {:>6}  to do", stats.todo.to_string().bold());
-    println!("  {:>6}  in progress", stats.in_progress.to_string().cyan().bold());
+    println!(
+        "  {:>6}  in progress",
+        stats.in_progress.to_string().cyan().bold()
+    );
     println!("  {:>6}  done", stats.done.to_string().green().bold());
     if stats.overdue > 0 {
-        println!("  {:>6}  {}", stats.overdue.to_string().red().bold(), "OVERDUE".red().bold());
+        println!(
+            "  {:>6}  {}",
+            stats.overdue.to_string().red().bold(),
+            "OVERDUE".red().bold()
+        );
     }
     if stats.critical > 0 {
-        println!("  {:>6}  {}", stats.critical.to_string().red().bold(), "critical (open)".red());
+        println!(
+            "  {:>6}  {}",
+            stats.critical.to_string().red().bold(),
+            "critical (open)".red()
+        );
     }
     if stats.total > 0 {
         let pct = stats.done * 100 / stats.total;

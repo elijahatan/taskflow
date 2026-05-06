@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use log::debug;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 use crate::models::task::{
@@ -31,6 +31,8 @@ impl<'a> TaskRepository<'a> {
             project_id: req.project_id,
             assignee: req.assignee,
             tags: req.tags.unwrap_or_default(),
+            blocked_by: Vec::new(),
+            blocks: Vec::new(),
             due_date: req.due_date,
             completed_at: None,
             created_at: Utc::now(),
@@ -82,6 +84,8 @@ impl<'a> TaskRepository<'a> {
             match result {
                 Ok(mut task) => {
                     task.tags = get_tags_for_task(conn, &task.id)?;
+                    task.blocked_by = get_dependency_ids(conn, &task.id)?;
+                    task.blocks = get_dependent_ids(conn, &task.id)?;
                     Ok(Some(task))
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -119,7 +123,9 @@ impl<'a> TaskRepository<'a> {
                 params_vec.push(Box::new(format!("%{}%", search)));
             }
             if filter.overdue_only {
-                where_clauses.push("t.due_date < datetime('now') AND t.status NOT IN ('done','cancelled')".into());
+                where_clauses.push(
+                    "t.due_date < datetime('now') AND t.status NOT IN ('done','cancelled')".into(),
+                );
             }
             if let Some(tag) = &filter.tag {
                 where_clauses.push(format!(
@@ -173,6 +179,8 @@ impl<'a> TaskRepository<'a> {
             let mut result = Vec::with_capacity(tasks.len());
             for mut task in tasks {
                 task.tags = get_tags_for_task(conn, &task.id)?;
+                task.blocked_by = get_dependency_ids(conn, &task.id)?;
+                task.blocks = get_dependent_ids(conn, &task.id)?;
                 result.push(task);
             }
 
@@ -186,16 +194,26 @@ impl<'a> TaskRepository<'a> {
             return Ok(None);
         }
 
+        if matches!(req.status, Some(TaskStatus::Done)) && self.has_unfinished_dependencies(id)? {
+            return Err(anyhow::anyhow!(
+                "Cannot mark task as done while it still has unfinished dependencies"
+            ));
+        }
+
         self.db.with_conn(|conn| {
             let now = Utc::now().to_rfc3339();
 
             if let Some(title) = &req.title {
-                conn.execute("UPDATE tasks SET title=?1, updated_at=?2 WHERE id=?3",
-                    params![title, now, id])?;
+                conn.execute(
+                    "UPDATE tasks SET title=?1, updated_at=?2 WHERE id=?3",
+                    params![title, now, id],
+                )?;
             }
             if let Some(desc) = &req.description {
-                conn.execute("UPDATE tasks SET description=?1, updated_at=?2 WHERE id=?3",
-                    params![desc, now, id])?;
+                conn.execute(
+                    "UPDATE tasks SET description=?1, updated_at=?2 WHERE id=?3",
+                    params![desc, now, id],
+                )?;
             }
             if let Some(status) = &req.status {
                 let completed_at = if *status == TaskStatus::Done {
@@ -209,28 +227,41 @@ impl<'a> TaskRepository<'a> {
                 )?;
             }
             if let Some(priority) = &req.priority {
-                conn.execute("UPDATE tasks SET priority=?1, updated_at=?2 WHERE id=?3",
-                    params![priority.as_str(), now, id])?;
+                conn.execute(
+                    "UPDATE tasks SET priority=?1, updated_at=?2 WHERE id=?3",
+                    params![priority.as_str(), now, id],
+                )?;
             }
             if let Some(assignee) = &req.assignee {
-                conn.execute("UPDATE tasks SET assignee=?1, updated_at=?2 WHERE id=?3",
-                    params![assignee, now, id])?;
+                conn.execute(
+                    "UPDATE tasks SET assignee=?1, updated_at=?2 WHERE id=?3",
+                    params![assignee, now, id],
+                )?;
             }
             if let Some(project_id) = &req.project_id {
-                conn.execute("UPDATE tasks SET project_id=?1, updated_at=?2 WHERE id=?3",
-                    params![project_id, now, id])?;
+                conn.execute(
+                    "UPDATE tasks SET project_id=?1, updated_at=?2 WHERE id=?3",
+                    params![project_id, now, id],
+                )?;
             }
             if let Some(due_date) = &req.due_date {
-                conn.execute("UPDATE tasks SET due_date=?1, updated_at=?2 WHERE id=?3",
-                    params![due_date.to_rfc3339(), now, id])?;
+                conn.execute(
+                    "UPDATE tasks SET due_date=?1, updated_at=?2 WHERE id=?3",
+                    params![due_date.to_rfc3339(), now, id],
+                )?;
             }
             if let Some(tags) = &req.tags {
                 conn.execute("DELETE FROM task_tags WHERE task_id=?1", params![id])?;
                 for tag in tags {
-                    conn.execute("INSERT OR IGNORE INTO task_tags (task_id, tag) VALUES (?1,?2)",
-                        params![id, tag])?;
+                    conn.execute(
+                        "INSERT OR IGNORE INTO task_tags (task_id, tag) VALUES (?1,?2)",
+                        params![id, tag],
+                    )?;
                 }
             }
+
+            sync_task_status_with_dependencies(conn, id)?;
+            sync_dependents_for_task(conn, id)?;
 
             Ok(())
         })?;
@@ -262,6 +293,68 @@ impl<'a> TaskRepository<'a> {
             Ok(TaskStatistics { total, todo, in_progress, done, overdue, critical })
         })
     }
+
+    pub fn add_dependency(&self, task_id: &str, depends_on_task_id: &str) -> Result<Task> {
+        if task_id == depends_on_task_id {
+            return Err(anyhow::anyhow!("A task cannot depend on itself"));
+        }
+        if self.get_by_id(task_id)?.is_none() {
+            return Err(anyhow::anyhow!("Task '{}' not found", task_id));
+        }
+        if self.get_by_id(depends_on_task_id)?.is_none() {
+            return Err(anyhow::anyhow!("Task '{}' not found", depends_on_task_id));
+        }
+
+        self.db.with_conn(|conn| {
+            if dependency_exists(conn, task_id, depends_on_task_id)? {
+                return Err(anyhow::anyhow!("Dependency already exists"));
+            }
+            if creates_cycle(conn, task_id, depends_on_task_id)? {
+                return Err(anyhow::anyhow!(
+                    "Cannot add dependency because it would create a cycle"
+                ));
+            }
+
+            conn.execute(
+                "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?1, ?2)",
+                params![task_id, depends_on_task_id],
+            )?;
+
+            sync_task_status_with_dependencies(conn, task_id)?;
+            Ok(())
+        })?;
+
+        self.get_by_id(task_id)?
+            .ok_or_else(|| anyhow::anyhow!("Task '{}' not found after update", task_id))
+    }
+
+    pub fn remove_dependency(&self, task_id: &str, depends_on_task_id: &str) -> Result<Task> {
+        if self.get_by_id(task_id)?.is_none() {
+            return Err(anyhow::anyhow!("Task '{}' not found", task_id));
+        }
+
+        self.db.with_conn(|conn| {
+            let rows = conn.execute(
+                "DELETE FROM task_dependencies WHERE task_id=?1 AND depends_on_task_id=?2",
+                params![task_id, depends_on_task_id],
+            )?;
+
+            if rows == 0 {
+                return Err(anyhow::anyhow!("Dependency does not exist"));
+            }
+
+            sync_task_status_with_dependencies(conn, task_id)?;
+            Ok(())
+        })?;
+
+        self.get_by_id(task_id)?
+            .ok_or_else(|| anyhow::anyhow!("Task '{}' not found after update", task_id))
+    }
+
+    pub fn has_unfinished_dependencies(&self, task_id: &str) -> Result<bool> {
+        self.db
+            .with_conn(|conn| has_unfinished_dependencies(conn, task_id))
+    }
 }
 
 fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
@@ -276,29 +369,150 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         id: row.get(0)?,
         title: row.get(1)?,
         description: row.get(2)?,
-        status: TaskStatus::from_str(&status_str)
-            .map_err(|e| rusqlite::Error::InvalidColumnType(3, e.to_string(), rusqlite::types::Type::Text))?,
-        priority: TaskPriority::from_str(&priority_str)
-            .map_err(|e| rusqlite::Error::InvalidColumnType(4, e.to_string(), rusqlite::types::Type::Text))?,
+        status: TaskStatus::from_str(&status_str).map_err(|e| {
+            rusqlite::Error::InvalidColumnType(3, e.to_string(), rusqlite::types::Type::Text)
+        })?,
+        priority: TaskPriority::from_str(&priority_str).map_err(|e| {
+            rusqlite::Error::InvalidColumnType(4, e.to_string(), rusqlite::types::Type::Text)
+        })?,
         project_id: row.get(5)?,
         assignee: row.get(6)?,
-        tags: Vec::new(), // filled in separately
-        due_date: due_date_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
-        completed_at: completed_at_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
+        tags: Vec::new(),       // filled in separately
+        blocked_by: Vec::new(), // filled in separately
+        blocks: Vec::new(),     // filled in separately
+        due_date: due_date_str.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }),
+        completed_at: completed_at_str.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }),
         created_at: DateTime::parse_from_rfc3339(&created_at_str)
-            .map_err(|e| rusqlite::Error::InvalidColumnType(9, e.to_string(), rusqlite::types::Type::Text))?
+            .map_err(|e| {
+                rusqlite::Error::InvalidColumnType(9, e.to_string(), rusqlite::types::Type::Text)
+            })?
             .with_timezone(&Utc),
         updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
-            .map_err(|e| rusqlite::Error::InvalidColumnType(10, e.to_string(), rusqlite::types::Type::Text))?
+            .map_err(|e| {
+                rusqlite::Error::InvalidColumnType(10, e.to_string(), rusqlite::types::Type::Text)
+            })?
             .with_timezone(&Utc),
     })
 }
 
 fn get_tags_for_task(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
     let mut stmt = conn.prepare("SELECT tag FROM task_tags WHERE task_id=?1 ORDER BY tag")?;
-    let tags = stmt.query_map(params![task_id], |row| row.get(0))?
+    let tags = stmt
+        .query_map(params![task_id], |row| row.get(0))?
         .collect::<Result<Vec<String>, _>>()?;
     Ok(tags)
+}
+
+fn get_dependency_ids(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT depends_on_task_id
+           FROM task_dependencies
+          WHERE task_id=?1
+          ORDER BY depends_on_task_id",
+    )?;
+    let ids = stmt
+        .query_map(params![task_id], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok(ids)
+}
+
+fn get_dependent_ids(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT task_id
+           FROM task_dependencies
+          WHERE depends_on_task_id=?1
+          ORDER BY task_id",
+    )?;
+    let ids = stmt
+        .query_map(params![task_id], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok(ids)
+}
+
+fn dependency_exists(conn: &Connection, task_id: &str, depends_on_task_id: &str) -> Result<bool> {
+    let exists: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM task_dependencies WHERE task_id=?1 AND depends_on_task_id=?2",
+        params![task_id, depends_on_task_id],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn has_unfinished_dependencies(conn: &Connection, task_id: &str) -> Result<bool> {
+    let count: u32 = conn.query_row(
+        "SELECT COUNT(*)
+           FROM task_dependencies td
+           JOIN tasks t ON t.id = td.depends_on_task_id
+          WHERE td.task_id = ?1
+            AND t.status NOT IN ('done', 'cancelled')",
+        params![task_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn creates_cycle(conn: &Connection, task_id: &str, depends_on_task_id: &str) -> Result<bool> {
+    fn visit(conn: &Connection, current: &str, target: &str) -> Result<bool> {
+        let mut stmt =
+            conn.prepare("SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?1")?;
+        let next_ids = stmt
+            .query_map(params![current], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+
+        for next in next_ids {
+            if next == target || visit(conn, &next, target)? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    visit(conn, depends_on_task_id, task_id)
+}
+
+fn sync_task_status_with_dependencies(conn: &Connection, task_id: &str) -> Result<()> {
+    let status: String = conn.query_row(
+        "SELECT status FROM tasks WHERE id=?1",
+        params![task_id],
+        |row| row.get(0),
+    )?;
+
+    if matches!(status.as_str(), "done" | "cancelled") {
+        return Ok(());
+    }
+
+    let now = Utc::now().to_rfc3339();
+    if has_unfinished_dependencies(conn, task_id)? {
+        if status != "blocked" {
+            conn.execute(
+                "UPDATE tasks SET status='blocked', updated_at=?1 WHERE id=?2",
+                params![now, task_id],
+            )?;
+        }
+    } else if status == "blocked" {
+        conn.execute(
+            "UPDATE tasks SET status='todo', updated_at=?1 WHERE id=?2",
+            params![now, task_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn sync_dependents_for_task(conn: &Connection, task_id: &str) -> Result<()> {
+    for dependent_id in get_dependent_ids(conn, task_id)? {
+        sync_task_status_with_dependencies(conn, &dependent_id)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]

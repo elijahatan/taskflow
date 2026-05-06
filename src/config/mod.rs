@@ -2,7 +2,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub database: DatabaseConfig,
@@ -46,12 +45,11 @@ impl Default for Config {
 impl Config {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = std::fs::read_to_string(path.as_ref())?;
-        let config: Config = toml::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("Config parse error: {}", e))?;
+        let config: Config =
+            toml::from_str(&content).map_err(|e| anyhow::anyhow!("Config parse error: {}", e))?;
         Ok(config)
     }
 
-   
     pub fn load() -> Self {
         let config_path = default_config_path();
         if config_path.exists() {

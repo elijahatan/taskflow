@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 use uuid::Uuid;
 
-use crate::models::project::{CreateProjectRequest, Project};
 use super::Database;
+use crate::models::project::{CreateProjectRequest, Project};
 
 pub struct ProjectRepository<'a> {
     db: &'a Database,
@@ -48,25 +48,38 @@ impl<'a> ProjectRepository<'a> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, name, description, color, created_at, updated_at
-                   FROM projects ORDER BY name"
+                   FROM projects ORDER BY name",
             )?;
-            let projects = stmt.query_map([], |row| {
-                let created_at_str: String = row.get(4)?;
-                let updated_at_str: String = row.get(5)?;
-                Ok(Project {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    color: row.get(3)?,
-                    created_at: DateTime::parse_from_rfc3339(&created_at_str)
-                        .map_err(|e| rusqlite::Error::InvalidColumnType(4, e.to_string(), rusqlite::types::Type::Text))?
-                        .with_timezone(&Utc),
-                    updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
-                        .map_err(|e| rusqlite::Error::InvalidColumnType(5, e.to_string(), rusqlite::types::Type::Text))?
-                        .with_timezone(&Utc),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+            let projects = stmt
+                .query_map([], |row| {
+                    let created_at_str: String = row.get(4)?;
+                    let updated_at_str: String = row.get(5)?;
+                    Ok(Project {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        description: row.get(2)?,
+                        color: row.get(3)?,
+                        created_at: DateTime::parse_from_rfc3339(&created_at_str)
+                            .map_err(|e| {
+                                rusqlite::Error::InvalidColumnType(
+                                    4,
+                                    e.to_string(),
+                                    rusqlite::types::Type::Text,
+                                )
+                            })?
+                            .with_timezone(&Utc),
+                        updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
+                            .map_err(|e| {
+                                rusqlite::Error::InvalidColumnType(
+                                    5,
+                                    e.to_string(),
+                                    rusqlite::types::Type::Text,
+                                )
+                            })?
+                            .with_timezone(&Utc),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(projects)
         })
     }
@@ -86,10 +99,22 @@ impl<'a> ProjectRepository<'a> {
                         description: row.get(2)?,
                         color: row.get(3)?,
                         created_at: DateTime::parse_from_rfc3339(&created_at_str)
-                            .map_err(|e| rusqlite::Error::InvalidColumnType(4, e.to_string(), rusqlite::types::Type::Text))?
+                            .map_err(|e| {
+                                rusqlite::Error::InvalidColumnType(
+                                    4,
+                                    e.to_string(),
+                                    rusqlite::types::Type::Text,
+                                )
+                            })?
                             .with_timezone(&Utc),
                         updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
-                            .map_err(|e| rusqlite::Error::InvalidColumnType(5, e.to_string(), rusqlite::types::Type::Text))?
+                            .map_err(|e| {
+                                rusqlite::Error::InvalidColumnType(
+                                    5,
+                                    e.to_string(),
+                                    rusqlite::types::Type::Text,
+                                )
+                            })?
                             .with_timezone(&Utc),
                     })
                 },

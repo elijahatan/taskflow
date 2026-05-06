@@ -16,6 +16,7 @@
 - **Project grouping** with optional hex color
 - **Tag system** with multi-tag filtering
 - **Due date tracking** with overdue highlighting
+- **Dependency tracking** with blocker/dependent relationships and cycle prevention
 - **Config file** at `~/.taskflow/config.toml` with env-var overrides
 - **Structured logging** via `env_logger`
 
@@ -81,6 +82,12 @@ taskflow list --search "auth" --format json
 # Show detailed view (partial ID OK)
 taskflow show a1b2c3d4
 
+# Block a task on another task
+taskflow block a1b2c3 --on d4e5f6
+
+# Remove a dependency
+taskflow unblock a1b2c3 --on d4e5f6
+
 # Mark done
 taskflow done a1b2c3
 
@@ -127,6 +134,9 @@ taskflow serve --host 0.0.0.0 --port 8765
 | PUT | `/api/v1/tasks/:id` | Update a task |
 | DELETE | `/api/v1/tasks/:id` | Delete a task |
 | POST | `/api/v1/tasks/:id/done` | Mark a task done |
+| GET | `/api/v1/tasks/:id/dependencies` | Get task details including dependencies |
+| POST | `/api/v1/tasks/:id/dependencies` | Add a dependency |
+| DELETE | `/api/v1/tasks/:id/dependencies/:depends_on_id` | Remove a dependency |
 | GET | `/api/v1/projects` | List projects |
 | POST | `/api/v1/projects` | Create a project |
 | DELETE | `/api/v1/projects/:id` | Delete a project |
@@ -145,6 +155,11 @@ curl 'http://localhost:8765/api/v1/tasks?status=todo&priority=high'
 
 # Mark done
 curl -X POST http://localhost:8765/api/v1/tasks/<id>/done
+
+# Add a dependency
+curl -X POST http://localhost:8765/api/v1/tasks/<id>/dependencies \
+  -H 'Content-Type: application/json' \
+  -d '{"depends_on_task_id":"<blocking-id>"}'
 ```
 
 ---
@@ -210,6 +225,13 @@ CREATE TABLE task_tags (
   task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   tag     TEXT NOT NULL,
   PRIMARY KEY (task_id, tag)
+);
+
+-- Task dependencies
+CREATE TABLE task_dependencies (
+  task_id            TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_id, depends_on_task_id)
 );
 ```
 

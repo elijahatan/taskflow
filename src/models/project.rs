@@ -24,11 +24,15 @@ impl CreateProjectRequest {
             return Err(anyhow::anyhow!("Project name cannot be empty"));
         }
         if self.name.len() > 100 {
-            return Err(anyhow::anyhow!("Project name must be 100 characters or fewer"));
+            return Err(anyhow::anyhow!(
+                "Project name must be 100 characters or fewer"
+            ));
         }
         if let Some(color) = &self.color {
             if !color.starts_with('#') || color.len() != 7 {
-                return Err(anyhow::anyhow!("Color must be a valid hex color like #ff5733"));
+                return Err(anyhow::anyhow!(
+                    "Color must be a valid hex color like #ff5733"
+                ));
             }
         }
         Ok(())

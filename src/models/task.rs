@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskPriority {
@@ -28,7 +27,10 @@ impl TaskPriority {
             "medium" => Ok(TaskPriority::Medium),
             "high" => Ok(TaskPriority::High),
             "critical" => Ok(TaskPriority::Critical),
-            _ => Err(anyhow::anyhow!("Unknown priority: '{}'. Use: low, medium, high, critical", s)),
+            _ => Err(anyhow::anyhow!(
+                "Unknown priority: '{}'. Use: low, medium, high, critical",
+                s
+            )),
         }
     }
 
@@ -83,7 +85,10 @@ impl TaskStatus {
             "blocked" => Ok(TaskStatus::Blocked),
             "done" | "completed" => Ok(TaskStatus::Done),
             "cancelled" | "canceled" => Ok(TaskStatus::Cancelled),
-            _ => Err(anyhow::anyhow!("Unknown status: '{}'. Use: todo, in_progress, blocked, done, cancelled", s)),
+            _ => Err(anyhow::anyhow!(
+                "Unknown status: '{}'. Use: todo, in_progress, blocked, done, cancelled",
+                s
+            )),
         }
     }
 
@@ -115,6 +120,8 @@ pub struct Task {
     pub project_id: Option<String>,
     pub assignee: Option<String>,
     pub tags: Vec<String>,
+    pub blocked_by: Vec<String>,
+    pub blocks: Vec<String>,
     pub due_date: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -134,9 +141,7 @@ impl Task {
         if self.status.is_terminal() {
             return false;
         }
-        self.due_date
-            .map(|due| due < Utc::now())
-            .unwrap_or(false)
+        self.due_date.map(|due| due < Utc::now()).unwrap_or(false)
     }
 
     /// Days until due (negative = overdue)
@@ -166,7 +171,9 @@ impl CreateTaskRequest {
             return Err(anyhow::anyhow!("Task title cannot be empty"));
         }
         if self.title.len() > 255 {
-            return Err(anyhow::anyhow!("Task title must be 255 characters or fewer"));
+            return Err(anyhow::anyhow!(
+                "Task title must be 255 characters or fewer"
+            ));
         }
         Ok(())
     }

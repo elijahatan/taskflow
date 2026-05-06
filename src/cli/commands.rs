@@ -3,11 +3,13 @@ use chrono::{DateTime, NaiveDate, Utc};
 use colored::*;
 
 use crate::cli::display;
-use crate::db::task_repo::TaskRepository;
 use crate::db::project_repo::ProjectRepository;
+use crate::db::task_repo::TaskRepository;
 use crate::db::Database;
 use crate::models::project::CreateProjectRequest;
-use crate::models::task::{CreateTaskRequest, TaskFilter, TaskPriority, TaskStatus, UpdateTaskRequest};
+use crate::models::task::{
+    CreateTaskRequest, TaskFilter, TaskPriority, TaskStatus, UpdateTaskRequest,
+};
 
 fn parse_tags(tags: Option<String>) -> Vec<String> {
     tags.map(|t| {
@@ -36,7 +38,10 @@ fn resolve_task_id(db: &Database, partial: &str) -> Result<String> {
     let all = repo.list(&TaskFilter::default())?;
     let matches: Vec<_> = all.iter().filter(|t| t.id.starts_with(partial)).collect();
     match matches.len() {
-        0 => Err(anyhow::anyhow!("No task found matching ID prefix '{}'", partial)),
+        0 => Err(anyhow::anyhow!(
+            "No task found matching ID prefix '{}'",
+            partial
+        )),
         1 => Ok(matches[0].id.clone()),
         _ => Err(anyhow::anyhow!(
             "Ambiguous ID prefix '{}' matches {} tasks. Use more characters.",
@@ -94,7 +99,10 @@ pub async fn task_list(
 ) -> Result<()> {
     let filter = TaskFilter {
         status: status.as_deref().map(TaskStatus::from_str).transpose()?,
-        priority: priority.as_deref().map(TaskPriority::from_str).transpose()?,
+        priority: priority
+            .as_deref()
+            .map(TaskPriority::from_str)
+            .transpose()?,
         project_id: project,
         assignee,
         tag,
@@ -124,10 +132,39 @@ pub async fn task_show(db: &Database, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn task_block(db: &Database, id: &str, on: &str) -> Result<()> {
+    let full_id = resolve_task_id(db, id)?;
+    let full_on = resolve_task_id(db, on)?;
+    let repo = TaskRepository::new(db);
+    let task = repo.add_dependency(&full_id, &full_on)?;
+    display::success(&format!(
+        "Task {} is now blocked by {}",
+        &task.id[..8].yellow(),
+        &full_on[..8].yellow()
+    ));
+    Ok(())
+}
+
+pub async fn task_unblock(db: &Database, id: &str, on: &str) -> Result<()> {
+    let full_id = resolve_task_id(db, id)?;
+    let full_on = resolve_task_id(db, on)?;
+    let repo = TaskRepository::new(db);
+    let task = repo.remove_dependency(&full_id, &full_on)?;
+    display::success(&format!(
+        "Removed dependency {} -> {}",
+        &task.id[..8].yellow(),
+        &full_on[..8].yellow()
+    ));
+    Ok(())
+}
+
 pub async fn task_done(db: &Database, id: &str) -> Result<()> {
     let full_id = resolve_task_id(db, id)?;
     let repo = TaskRepository::new(db);
-    let req = UpdateTaskRequest { status: Some(TaskStatus::Done), ..Default::default() };
+    let req = UpdateTaskRequest {
+        status: Some(TaskStatus::Done),
+        ..Default::default()
+    };
     match repo.update(&full_id, req)? {
         Some(task) => display::success(&format!(
             "Marked {} — {} as {}",
@@ -154,7 +191,10 @@ pub async fn task_update(
     let req = UpdateTaskRequest {
         title,
         status: status.as_deref().map(TaskStatus::from_str).transpose()?,
-        priority: priority.as_deref().map(TaskPriority::from_str).transpose()?,
+        priority: priority
+            .as_deref()
+            .map(TaskPriority::from_str)
+            .transpose()?,
         assignee,
         tags: tags.map(|t| parse_tags(Some(t))),
         due_date: due.as_deref().map(parse_due_date).transpose()?,
@@ -212,7 +252,11 @@ pub async fn project_add(
     color: Option<String>,
 ) -> Result<()> {
     let repo = ProjectRepository::new(db);
-    let project = repo.create(CreateProjectRequest { name, description, color })?;
+    let project = repo.create(CreateProjectRequest {
+        name,
+        description,
+        color,
+    })?;
     display::success(&format!(
         "Created project {} — {}",
         &project.id[..8].yellow(),
@@ -225,7 +269,10 @@ pub async fn project_list(db: &Database) -> Result<()> {
     let repo = ProjectRepository::new(db);
     let projects = repo.list()?;
     if projects.is_empty() {
-        println!("{}", "No projects yet. Use `taskflow project add <name>`.".dimmed());
+        println!(
+            "{}",
+            "No projects yet. Use `taskflow project add <name>`.".dimmed()
+        );
     } else {
         println!();
         println!(

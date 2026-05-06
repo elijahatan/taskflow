@@ -1,13 +1,12 @@
 pub mod migrations;
-pub mod task_repo;
 pub mod project_repo;
+pub mod task_repo;
 
 use anyhow::Result;
 use log::info;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-
 
 #[derive(Clone)]
 pub struct Database {
@@ -46,7 +45,10 @@ impl Database {
     where
         F: FnOnce(&Connection) -> Result<T>,
     {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("DB mutex poisoned"))?;
         f(&conn)
     }
 
@@ -60,22 +62,20 @@ impl Database {
 
     pub fn stats(&self) -> Result<DbStats> {
         self.with_conn(|conn| {
-            let task_count: u32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks",
-                [],
-                |row| row.get(0),
-            )?;
-            let project_count: u32 = conn.query_row(
-                "SELECT COUNT(*) FROM projects",
-                [],
-                |row| row.get(0),
-            )?;
+            let task_count: u32 =
+                conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
+            let project_count: u32 =
+                conn.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
             let done_count: u32 = conn.query_row(
                 "SELECT COUNT(*) FROM tasks WHERE status = 'done'",
                 [],
                 |row| row.get(0),
             )?;
-            Ok(DbStats { task_count, project_count, done_count })
+            Ok(DbStats {
+                task_count,
+                project_count,
+                done_count,
+            })
         })
     }
 }

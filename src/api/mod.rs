@@ -9,13 +9,15 @@ use crate::db::Database;
 
 pub use router::handle_request;
 
-
 pub async fn serve(host: &str, port: u16, db: Database) -> Result<()> {
     let addr = format!("{}:{}", host, port);
 
     println!();
     println!("{}", "  TaskFlow API Server  ".on_blue().white().bold());
-    println!("  Listening on {}", format!("http://{}", addr).cyan().bold());
+    println!(
+        "  Listening on {}",
+        format!("http://{}", addr).cyan().bold()
+    );
     println!("  Press Ctrl+C to stop");
     println!();
     println!("  Routes:");
@@ -25,7 +27,10 @@ pub async fn serve(host: &str, port: u16, db: Database) -> Result<()> {
     println!("    GET  /api/v1/tasks/:id");
     println!("    PUT  /api/v1/tasks/:id");
     println!("    DELETE /api/v1/tasks/:id");
-    println!("    GET  /api/v1/tasks/:id/done");
+    println!("    POST /api/v1/tasks/:id/done");
+    println!("    GET  /api/v1/tasks/:id/dependencies");
+    println!("    POST /api/v1/tasks/:id/dependencies");
+    println!("    DELETE /api/v1/tasks/:id/dependencies/:depends_on_id");
     println!("    GET  /api/v1/projects");
     println!("    POST /api/v1/projects");
     println!("    GET  /api/v1/stats");

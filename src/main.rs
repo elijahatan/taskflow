@@ -4,16 +4,15 @@ mod config;
 mod db;
 mod models;
 
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 use log::info;
+use std::path::{Path, PathBuf};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let (global, cmd) = cli::parse_args()?;
 
-    let log_level = std::env::var("RUST_LOG")
-        .unwrap_or_else(|_| global.log_level.clone());
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| global.log_level.clone());
 
     std::env::set_var("RUST_LOG", &log_level);
     env_logger::init();
