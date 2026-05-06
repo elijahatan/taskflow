@@ -19,6 +19,7 @@ OPTIONS:
 
 COMMANDS:
   add       Add a new task
+  filter    Manage smart filters (sub: save, list, show, delete)
   list      List tasks  (alias: ls)
   show      Show task detail
   block     Add a task dependency
@@ -48,6 +49,7 @@ pub enum Command {
         due: Option<String>,
     },
     List {
+        view: Option<String>,
         status: Option<String>,
         priority: Option<String>,
         project: Option<String>,
@@ -85,6 +87,24 @@ pub enum Command {
     Delete {
         id: String,
         yes: bool,
+    },
+    FilterSave {
+        name: String,
+        status: Option<String>,
+        priority: Option<String>,
+        project: Option<String>,
+        assignee: Option<String>,
+        tag: Option<String>,
+        search: Option<String>,
+        overdue: bool,
+        limit: Option<u32>,
+    },
+    FilterList,
+    FilterShow {
+        name: String,
+    },
+    FilterDelete {
+        name: String,
     },
     ProjectAdd {
         name: String,
@@ -140,6 +160,7 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
         }
 
         "list" | "ls" => Command::List {
+            view: args.opt_value_from_str("--view")?,
             status: args.opt_value_from_str(["-s", "--status"])?,
             priority: args.opt_value_from_str(["-p", "--priority"])?,
             project: args.opt_value_from_str("--project")?,
@@ -152,6 +173,47 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
                 .unwrap_or_else(|| "table".to_string()),
             limit: args.opt_value_from_str(["-l", "--limit"])?,
         },
+
+        "filter" => {
+            let sub = args.subcommand()?.unwrap_or_default();
+            match sub.as_str() {
+                "save" => {
+                    let name: String = args
+                        .free_from_str()
+                        .map_err(|_| anyhow!("filter save requires a name"))?;
+                    Command::FilterSave {
+                        name,
+                        status: args.opt_value_from_str(["-s", "--status"])?,
+                        priority: args.opt_value_from_str(["-p", "--priority"])?,
+                        project: args.opt_value_from_str("--project")?,
+                        assignee: args.opt_value_from_str("--assignee")?,
+                        tag: args.opt_value_from_str("--tag")?,
+                        search: args.opt_value_from_str(["-q", "--search"])?,
+                        overdue: args.contains("--overdue"),
+                        limit: args.opt_value_from_str(["-l", "--limit"])?,
+                    }
+                }
+                "list" | "ls" => Command::FilterList,
+                "show" => {
+                    let name: String = args
+                        .free_from_str()
+                        .map_err(|_| anyhow!("filter show requires a name"))?;
+                    Command::FilterShow { name }
+                }
+                "delete" | "rm" => {
+                    let name: String = args
+                        .free_from_str()
+                        .map_err(|_| anyhow!("filter delete requires a name"))?;
+                    Command::FilterDelete { name }
+                }
+                other => {
+                    return Err(anyhow!(
+                        "Unknown filter subcommand: '{}'. Use: save, list, show, delete",
+                        other
+                    ))
+                }
+            }
+        }
 
         "show" => {
             let id: String = args
@@ -298,6 +360,7 @@ pub async fn run(cmd: Command, db: &Database) -> Result<()> {
             .await
         }
         Command::List {
+            view,
             status,
             priority,
             project,
@@ -309,7 +372,7 @@ pub async fn run(cmd: Command, db: &Database) -> Result<()> {
             limit,
         } => {
             commands::task_list(
-                db, status, priority, project, assignee, tag, search, overdue, &format, limit,
+                db, view, status, priority, project, assignee, tag, search, overdue, &format, limit,
             )
             .await
         }
@@ -333,6 +396,25 @@ pub async fn run(cmd: Command, db: &Database) -> Result<()> {
             .await
         }
         Command::Delete { id, yes } => commands::task_delete(db, &id, yes).await,
+        Command::FilterSave {
+            name,
+            status,
+            priority,
+            project,
+            assignee,
+            tag,
+            search,
+            overdue,
+            limit,
+        } => {
+            commands::filter_save(
+                name, status, priority, project, assignee, tag, search, overdue, limit,
+            )
+            .await
+        }
+        Command::FilterList => commands::filter_list().await,
+        Command::FilterShow { name } => commands::filter_show(&name).await,
+        Command::FilterDelete { name } => commands::filter_delete(&name).await,
         Command::ProjectAdd {
             name,
             description,

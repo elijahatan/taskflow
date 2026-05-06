@@ -1,12 +1,17 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+use crate::models::task::{TaskFilter, TaskPriority, TaskStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub database: DatabaseConfig,
     pub server: ServerConfig,
     pub log: LogConfig,
+    #[serde(default)]
+    pub smart_filters: BTreeMap<String, SavedFilter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +30,43 @@ pub struct LogConfig {
     pub level: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SavedFilter {
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub project_id: Option<String>,
+    pub assignee: Option<String>,
+    pub tag: Option<String>,
+    pub search: Option<String>,
+    #[serde(default)]
+    pub overdue_only: bool,
+    pub limit: Option<u32>,
+}
+
+impl SavedFilter {
+    pub fn to_task_filter(&self) -> Result<TaskFilter> {
+        Ok(TaskFilter {
+            status: self
+                .status
+                .as_deref()
+                .map(TaskStatus::from_str)
+                .transpose()?,
+            priority: self
+                .priority
+                .as_deref()
+                .map(TaskPriority::from_str)
+                .transpose()?,
+            project_id: self.project_id.clone(),
+            assignee: self.assignee.clone(),
+            tag: self.tag.clone(),
+            search: self.search.clone(),
+            overdue_only: self.overdue_only,
+            limit: self.limit,
+            offset: None,
+        })
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -38,6 +80,7 @@ impl Default for Config {
             log: LogConfig {
                 level: "info".into(),
             },
+            smart_filters: BTreeMap::new(),
         }
     }
 }
@@ -96,6 +139,18 @@ impl Config {
         if let Ok(level) = std::env::var("RUST_LOG") {
             self.log.level = level;
         }
+    }
+
+    pub fn get_saved_filter(&self, name: &str) -> Option<&SavedFilter> {
+        self.smart_filters.get(name)
+    }
+
+    pub fn upsert_saved_filter(&mut self, name: String, filter: SavedFilter) {
+        self.smart_filters.insert(name, filter);
+    }
+
+    pub fn remove_saved_filter(&mut self, name: &str) -> bool {
+        self.smart_filters.remove(name).is_some()
     }
 }
 

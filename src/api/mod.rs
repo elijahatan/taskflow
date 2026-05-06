@@ -22,6 +22,9 @@ pub async fn serve(host: &str, port: u16, db: Database) -> Result<()> {
     println!("    GET  /health");
     println!("    GET  /api/v1/tasks");
     println!("    POST /api/v1/tasks");
+    println!("    GET  /api/v1/filters");
+    println!("    POST /api/v1/filters/:name");
+    println!("    DELETE /api/v1/filters/:name");
     println!("    GET  /api/v1/tasks/:id");
     println!("    GET  /api/v1/tasks/:id/activity");
     println!("    PUT  /api/v1/tasks/:id");

@@ -19,6 +19,7 @@
 - **Dependency tracking** with blocker/dependent relationships and cycle prevention
 - **Recurring tasks** with daily / weekly / monthly / yearly schedules
 - **Task activity history** for create/update/block/complete lifecycle events
+- **Smart filters** with saved named views in config and reusable CLI/API queries
 - **Config file** at `~/.taskflow/config.toml` with env-var overrides
 - **Structured logging** via `env_logger`
 
@@ -82,6 +83,9 @@ taskflow list --priority high --assignee alice --overdue
 # Filter — full-text search, JSON output
 taskflow list --search "auth" --format json
 
+# Apply a saved smart filter
+taskflow list --view urgent
+
 # Show detailed view (partial ID OK)
 taskflow show a1b2c3d4
 
@@ -102,6 +106,22 @@ taskflow delete a1b2c3
 
 # Delete without prompt
 taskflow delete a1b2c3 --yes
+```
+
+### Smart Filters
+
+```bash
+# Save a named filter
+taskflow filter save urgent --priority high --overdue
+
+# List saved filters
+taskflow filter list
+
+# Show one saved filter
+taskflow filter show urgent
+
+# Delete a saved filter
+taskflow filter delete urgent
 ```
 
 ### Projects
@@ -133,6 +153,9 @@ taskflow serve --host 0.0.0.0 --port 8765
 | GET | `/health` | Health check |
 | GET | `/api/v1/tasks` | List tasks (supports query params) |
 | POST | `/api/v1/tasks` | Create a task |
+| GET | `/api/v1/filters` | List saved smart filters |
+| POST | `/api/v1/filters/:name` | Save or update a smart filter |
+| DELETE | `/api/v1/filters/:name` | Delete a smart filter |
 | GET | `/api/v1/tasks/:id` | Get a task |
 | GET | `/api/v1/tasks/:id/activity` | Get task activity history |
 | PUT | `/api/v1/tasks/:id` | Update a task |
@@ -162,6 +185,9 @@ curl -X POST http://localhost:8765/api/v1/tasks \
 # List with filter
 curl 'http://localhost:8765/api/v1/tasks?status=todo&priority=high'
 
+# List with a saved smart filter
+curl 'http://localhost:8765/api/v1/tasks?view=urgent'
+
 # Mark done
 curl -X POST http://localhost:8765/api/v1/tasks/<id>/done
 
@@ -172,6 +198,11 @@ curl -X POST http://localhost:8765/api/v1/tasks/<id>/dependencies \
 
 # Fetch activity history
 curl http://localhost:8765/api/v1/tasks/<id>/activity
+
+# Save a smart filter
+curl -X POST http://localhost:8765/api/v1/filters/urgent \
+  -H 'Content-Type: application/json' \
+  -d '{"priority":"high","overdue_only":true}'
 ```
 
 ---
@@ -190,6 +221,10 @@ port = 8765
 
 [log]
 level = "info"
+
+[smart_filters.urgent]
+priority = "high"
+overdue_only = true
 ```
 
 ### Environment variables

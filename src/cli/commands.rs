@@ -3,6 +3,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use colored::*;
 
 use crate::cli::display;
+use crate::config::{Config, SavedFilter};
 use crate::db::project_repo::ProjectRepository;
 use crate::db::task_repo::TaskRepository;
 use crate::db::Database;
@@ -101,6 +102,7 @@ pub async fn task_add(
 
 pub async fn task_list(
     db: &Database,
+    view: Option<String>,
     status: Option<String>,
     priority: Option<String>,
     project: Option<String>,
@@ -111,20 +113,41 @@ pub async fn task_list(
     format: &str,
     limit: Option<u32>,
 ) -> Result<()> {
-    let filter = TaskFilter {
-        status: status.as_deref().map(TaskStatus::from_str).transpose()?,
-        priority: priority
-            .as_deref()
-            .map(TaskPriority::from_str)
-            .transpose()?,
-        project_id: project,
-        assignee,
-        tag,
-        search,
-        overdue_only: overdue,
-        limit,
-        offset: None,
+    let mut filter = if let Some(view_name) = view {
+        let config = Config::load();
+        config
+            .get_saved_filter(&view_name)
+            .ok_or_else(|| anyhow::anyhow!("Saved filter '{}' not found", view_name))?
+            .to_task_filter()?
+    } else {
+        TaskFilter::default()
     };
+
+    if let Some(status) = status {
+        filter.status = Some(TaskStatus::from_str(&status)?);
+    }
+    if let Some(priority) = priority {
+        filter.priority = Some(TaskPriority::from_str(&priority)?);
+    }
+    if let Some(project) = project {
+        filter.project_id = Some(project);
+    }
+    if let Some(assignee) = assignee {
+        filter.assignee = Some(assignee);
+    }
+    if let Some(tag) = tag {
+        filter.tag = Some(tag);
+    }
+    if let Some(search) = search {
+        filter.search = Some(search);
+    }
+    if overdue {
+        filter.overdue_only = true;
+    }
+    if let Some(limit) = limit {
+        filter.limit = Some(limit);
+    }
+    filter.offset = None;
 
     let repo = TaskRepository::new(db);
     let tasks = repo.list(&filter)?;
@@ -134,6 +157,132 @@ pub async fn task_list(
         _ => display::render_task_table(&tasks),
     }
     Ok(())
+}
+
+pub async fn filter_save(
+    name: String,
+    status: Option<String>,
+    priority: Option<String>,
+    project: Option<String>,
+    assignee: Option<String>,
+    tag: Option<String>,
+    search: Option<String>,
+    overdue: bool,
+    limit: Option<u32>,
+) -> Result<()> {
+    if status.is_none()
+        && priority.is_none()
+        && project.is_none()
+        && assignee.is_none()
+        && tag.is_none()
+        && search.is_none()
+        && !overdue
+        && limit.is_none()
+    {
+        return Err(anyhow::anyhow!(
+            "Cannot save an empty filter. Provide at least one filter option."
+        ));
+    }
+
+    if let Some(status) = &status {
+        TaskStatus::from_str(status)?;
+    }
+    if let Some(priority) = &priority {
+        TaskPriority::from_str(priority)?;
+    }
+
+    let mut config = Config::load();
+    config.upsert_saved_filter(
+        name.clone(),
+        SavedFilter {
+            status,
+            priority,
+            project_id: project,
+            assignee,
+            tag,
+            search,
+            overdue_only: overdue,
+            limit,
+        },
+    );
+    config.save()?;
+
+    display::success(&format!("Saved smart filter '{}'", name.bold()));
+    Ok(())
+}
+
+pub async fn filter_list() -> Result<()> {
+    let config = Config::load();
+    if config.smart_filters.is_empty() {
+        println!("{}", "No saved filters yet.".dimmed());
+        return Ok(());
+    }
+
+    println!();
+    println!("  {:<20} {}", "Name".bold(), "Definition".bold());
+    println!("  {}", "─".repeat(72).dimmed());
+    for (name, filter) in &config.smart_filters {
+        let summary = describe_saved_filter(filter);
+        println!("  {:<20} {}", name, summary);
+    }
+    println!();
+    Ok(())
+}
+
+pub async fn filter_show(name: &str) -> Result<()> {
+    let config = Config::load();
+    let filter = config
+        .get_saved_filter(name)
+        .ok_or_else(|| anyhow::anyhow!("Saved filter '{}' not found", name))?;
+
+    println!();
+    println!("  {} {}", "Filter:".bold(), name.bold());
+    println!("  {}", describe_saved_filter(filter));
+    println!();
+    Ok(())
+}
+
+pub async fn filter_delete(name: &str) -> Result<()> {
+    let mut config = Config::load();
+    if !config.remove_saved_filter(name) {
+        return Err(anyhow::anyhow!("Saved filter '{}' not found", name));
+    }
+    config.save()?;
+    display::success(&format!("Deleted smart filter '{}'", name.bold()));
+    Ok(())
+}
+
+fn describe_saved_filter(filter: &SavedFilter) -> String {
+    let mut parts = Vec::new();
+    if let Some(status) = &filter.status {
+        parts.push(format!("status={}", status));
+    }
+    if let Some(priority) = &filter.priority {
+        parts.push(format!("priority={}", priority));
+    }
+    if let Some(project_id) = &filter.project_id {
+        parts.push(format!("project={}", project_id));
+    }
+    if let Some(assignee) = &filter.assignee {
+        parts.push(format!("assignee={}", assignee));
+    }
+    if let Some(tag) = &filter.tag {
+        parts.push(format!("tag={}", tag));
+    }
+    if let Some(search) = &filter.search {
+        parts.push(format!("search={}", search));
+    }
+    if filter.overdue_only {
+        parts.push("overdue=true".to_string());
+    }
+    if let Some(limit) = filter.limit {
+        parts.push(format!("limit={}", limit));
+    }
+    if parts.is_empty() {
+        "empty".to_string()
+    } else {
+        parts.join(", ")
+    }
 }
 
 pub async fn task_show(db: &Database, id: &str) -> Result<()> {

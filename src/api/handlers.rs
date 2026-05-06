@@ -1,5 +1,6 @@
 use log::warn;
 
+use crate::config::{Config, SavedFilter};
 use crate::db::project_repo::ProjectRepository;
 use crate::db::task_repo::TaskRepository;
 use crate::db::Database;
@@ -15,8 +16,21 @@ struct DependencyRequest {
     depends_on_task_id: String,
 }
 
+#[derive(serde::Deserialize)]
+struct SavedFilterRequest {
+    status: Option<String>,
+    priority: Option<String>,
+    project_id: Option<String>,
+    assignee: Option<String>,
+    tag: Option<String>,
+    search: Option<String>,
+    overdue_only: Option<bool>,
+    limit: Option<u32>,
+}
+
 pub fn list_tasks(query: &str, db: &Database) -> ApiResponse {
     let mut filter = TaskFilter::default();
+    let mut view_name: Option<String> = None;
 
     for pair in query.split('&').filter(|s| !s.is_empty()) {
         let mut kv = pair.splitn(2, '=');
@@ -24,6 +38,7 @@ pub fn list_tasks(query: &str, db: &Database) -> ApiResponse {
         let val = kv.next().unwrap_or("").trim();
 
         match key {
+            "view" => view_name = Some(url_decode(val)),
             "status" => match TaskStatus::from_str(val) {
                 Ok(s) => filter.status = Some(s),
                 Err(e) => return ApiResponse::bad_request(&e.to_string()),
@@ -43,6 +58,46 @@ pub fn list_tasks(query: &str, db: &Database) -> ApiResponse {
         }
     }
 
+    if let Some(view_name) = view_name {
+        let config = Config::load();
+        let saved = match config.get_saved_filter(&view_name) {
+            Some(saved) => saved,
+            None => {
+                return ApiResponse::not_found(&format!("Saved filter '{}' not found", view_name))
+            }
+        };
+        match saved.to_task_filter() {
+            Ok(mut saved_filter) => {
+                if filter.status.is_some() {
+                    saved_filter.status = filter.status;
+                }
+                if filter.priority.is_some() {
+                    saved_filter.priority = filter.priority;
+                }
+                if filter.project_id.is_some() {
+                    saved_filter.project_id = filter.project_id;
+                }
+                if filter.assignee.is_some() {
+                    saved_filter.assignee = filter.assignee;
+                }
+                if filter.tag.is_some() {
+                    saved_filter.tag = filter.tag;
+                }
+                if filter.search.is_some() {
+                    saved_filter.search = filter.search;
+                }
+                if filter.overdue_only {
+                    saved_filter.overdue_only = true;
+                }
+                if filter.limit.is_some() {
+                    saved_filter.limit = filter.limit;
+                }
+                filter = saved_filter;
+            }
+            Err(e) => return ApiResponse::bad_request(&e.to_string()),
+        }
+    }
+
     let repo = TaskRepository::new(db);
     match repo.list(&filter) {
         Ok(tasks) => match serde_json::to_string(&tasks) {
@@ -53,6 +108,62 @@ pub fn list_tasks(query: &str, db: &Database) -> ApiResponse {
             warn!("list_tasks error: {}", e);
             ApiResponse::internal_error(&e.to_string())
         }
+    }
+}
+
+pub fn list_saved_filters() -> ApiResponse {
+    let config = Config::load();
+    match serde_json::to_string(&config.smart_filters) {
+        Ok(json) => ApiResponse::ok(json),
+        Err(e) => ApiResponse::internal_error(&e.to_string()),
+    }
+}
+
+pub fn save_filter(name: &str, body: &str) -> ApiResponse {
+    let req: SavedFilterRequest = match serde_json::from_str(body) {
+        Ok(r) => r,
+        Err(e) => return ApiResponse::bad_request(&format!("Invalid JSON: {}", e)),
+    };
+
+    if let Some(status) = &req.status {
+        if let Err(e) = TaskStatus::from_str(status) {
+            return ApiResponse::bad_request(&e.to_string());
+        }
+    }
+    if let Some(priority) = &req.priority {
+        if let Err(e) = TaskPriority::from_str(priority) {
+            return ApiResponse::bad_request(&e.to_string());
+        }
+    }
+
+    let mut config = Config::load();
+    config.upsert_saved_filter(
+        name.to_string(),
+        SavedFilter {
+            status: req.status,
+            priority: req.priority,
+            project_id: req.project_id,
+            assignee: req.assignee,
+            tag: req.tag,
+            search: req.search,
+            overdue_only: req.overdue_only.unwrap_or(false),
+            limit: req.limit,
+        },
+    );
+    match config.save() {
+        Ok(()) => ApiResponse::created(format!(r#"{{"saved":"{}"}}"#, name)),
+        Err(e) => ApiResponse::internal_error(&e.to_string()),
+    }
+}
+
+pub fn delete_filter(name: &str) -> ApiResponse {
+    let mut config = Config::load();
+    if !config.remove_saved_filter(name) {
+        return ApiResponse::not_found(&format!("Saved filter '{}' not found", name));
+    }
+    match config.save() {
+        Ok(()) => ApiResponse::ok(format!(r#"{{"deleted":"{}"}}"#, name)),
+        Err(e) => ApiResponse::internal_error(&e.to_string()),
     }
 }
 

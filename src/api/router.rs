@@ -85,6 +85,9 @@ fn route(method: &Method, path: &str, query: &str, body: &str, db: &Database) ->
 
         (Method::Get, ["api", "v1", "tasks"]) => handlers::list_tasks(query, db),
         (Method::Post, ["api", "v1", "tasks"]) => handlers::create_task(body, db),
+        (Method::Get, ["api", "v1", "filters"]) => handlers::list_saved_filters(),
+        (Method::Post, ["api", "v1", "filters", name]) => handlers::save_filter(name, body),
+        (Method::Delete, ["api", "v1", "filters", name]) => handlers::delete_filter(name),
 
         (Method::Get, ["api", "v1", "tasks", id]) => handlers::get_task(id, db),
         (Method::Get, ["api", "v1", "tasks", id, "activity"]) => {
