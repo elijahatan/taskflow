@@ -5,7 +5,8 @@ use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 use crate::models::task::{
-    CreateTaskRequest, Task, TaskFilter, TaskPriority, TaskStatus, UpdateTaskRequest,
+    CreateTaskRequest, Task, TaskFilter, TaskPriority, TaskRecurrence, TaskStatus,
+    UpdateTaskRequest,
 };
 
 use super::Database;
@@ -33,6 +34,7 @@ impl<'a> TaskRepository<'a> {
             tags: req.tags.unwrap_or_default(),
             blocked_by: Vec::new(),
             blocks: Vec::new(),
+            recurrence: req.recurrence,
             due_date: req.due_date,
             completed_at: None,
             created_at: Utc::now(),
@@ -42,8 +44,8 @@ impl<'a> TaskRepository<'a> {
         self.db.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO tasks (id, title, description, status, priority, project_id,
-                  assignee, due_date, completed_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                  assignee, recurrence, due_date, completed_at, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                 params![
                     task.id,
                     task.title,
@@ -52,6 +54,7 @@ impl<'a> TaskRepository<'a> {
                     task.priority.as_str(),
                     task.project_id,
                     task.assignee,
+                    task.recurrence.as_ref().map(|r| r.as_str().to_string()),
                     task.due_date.map(|d| d.to_rfc3339()),
                     task.completed_at.map(|d| d.to_rfc3339()),
                     task.created_at.to_rfc3339(),
@@ -75,7 +78,7 @@ impl<'a> TaskRepository<'a> {
         self.db.with_conn(|conn| {
             let result = conn.query_row(
                 "SELECT id, title, description, status, priority, project_id,
-                        assignee, due_date, completed_at, created_at, updated_at
+                        assignee, recurrence, due_date, completed_at, created_at, updated_at
                    FROM tasks WHERE id = ?1",
                 params![id],
                 row_to_task,
@@ -152,7 +155,7 @@ impl<'a> TaskRepository<'a> {
 
             let query = format!(
                 "SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id,
-                        t.assignee, t.due_date, t.completed_at, t.created_at, t.updated_at
+                        t.assignee, t.recurrence, t.due_date, t.completed_at, t.created_at, t.updated_at
                    FROM tasks t
                    {where_sql}
                    ORDER BY
@@ -201,6 +204,8 @@ impl<'a> TaskRepository<'a> {
         }
 
         self.db.with_conn(|conn| {
+            let existing = get_task_by_id(conn, id)?
+                .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", id))?;
             let now = Utc::now().to_rfc3339();
 
             if let Some(title) = &req.title {
@@ -244,6 +249,12 @@ impl<'a> TaskRepository<'a> {
                     params![project_id, now, id],
                 )?;
             }
+            if let Some(recurrence) = &req.recurrence {
+                conn.execute(
+                    "UPDATE tasks SET recurrence=?1, updated_at=?2 WHERE id=?3",
+                    params![recurrence.as_ref().map(|r| r.as_str().to_string()), now, id],
+                )?;
+            }
             if let Some(due_date) = &req.due_date {
                 conn.execute(
                     "UPDATE tasks SET due_date=?1, updated_at=?2 WHERE id=?3",
@@ -262,6 +273,9 @@ impl<'a> TaskRepository<'a> {
 
             sync_task_status_with_dependencies(conn, id)?;
             sync_dependents_for_task(conn, id)?;
+            if matches!(req.status, Some(TaskStatus::Done)) && existing.status != TaskStatus::Done {
+                create_next_recurring_task(conn, &existing)?;
+            }
 
             Ok(())
         })?;
@@ -360,10 +374,11 @@ impl<'a> TaskRepository<'a> {
 fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let status_str: String = row.get(3)?;
     let priority_str: String = row.get(4)?;
-    let due_date_str: Option<String> = row.get(7)?;
-    let completed_at_str: Option<String> = row.get(8)?;
-    let created_at_str: String = row.get(9)?;
-    let updated_at_str: String = row.get(10)?;
+    let recurrence_str: Option<String> = row.get(7)?;
+    let due_date_str: Option<String> = row.get(8)?;
+    let completed_at_str: Option<String> = row.get(9)?;
+    let created_at_str: String = row.get(10)?;
+    let updated_at_str: String = row.get(11)?;
 
     Ok(Task {
         id: row.get(0)?,
@@ -380,6 +395,12 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         tags: Vec::new(),       // filled in separately
         blocked_by: Vec::new(), // filled in separately
         blocks: Vec::new(),     // filled in separately
+        recurrence: recurrence_str
+            .map(|s| TaskRecurrence::from_str(&s))
+            .transpose()
+            .map_err(|e| {
+                rusqlite::Error::InvalidColumnType(7, e.to_string(), rusqlite::types::Type::Text)
+            })?,
         due_date: due_date_str.and_then(|s| {
             DateTime::parse_from_rfc3339(&s)
                 .ok()
@@ -392,15 +413,36 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         }),
         created_at: DateTime::parse_from_rfc3339(&created_at_str)
             .map_err(|e| {
-                rusqlite::Error::InvalidColumnType(9, e.to_string(), rusqlite::types::Type::Text)
+                rusqlite::Error::InvalidColumnType(10, e.to_string(), rusqlite::types::Type::Text)
             })?
             .with_timezone(&Utc),
         updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
             .map_err(|e| {
-                rusqlite::Error::InvalidColumnType(10, e.to_string(), rusqlite::types::Type::Text)
+                rusqlite::Error::InvalidColumnType(11, e.to_string(), rusqlite::types::Type::Text)
             })?
             .with_timezone(&Utc),
     })
+}
+
+fn get_task_by_id(conn: &Connection, id: &str) -> Result<Option<Task>> {
+    let result = conn.query_row(
+        "SELECT id, title, description, status, priority, project_id,
+                assignee, recurrence, due_date, completed_at, created_at, updated_at
+           FROM tasks WHERE id = ?1",
+        params![id],
+        row_to_task,
+    );
+
+    match result {
+        Ok(mut task) => {
+            task.tags = get_tags_for_task(conn, &task.id)?;
+            task.blocked_by = get_dependency_ids(conn, &task.id)?;
+            task.blocks = get_dependent_ids(conn, &task.id)?;
+            Ok(Some(task))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn get_tags_for_task(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
@@ -515,6 +557,47 @@ fn sync_dependents_for_task(conn: &Connection, task_id: &str) -> Result<()> {
     Ok(())
 }
 
+fn create_next_recurring_task(conn: &Connection, task: &Task) -> Result<()> {
+    let Some(recurrence) = &task.recurrence else {
+        return Ok(());
+    };
+
+    let next_due_date = task
+        .due_date
+        .and_then(|due_date| recurrence.next_due_date(due_date));
+    let now = Utc::now();
+    let next_task_id = Uuid::new_v4().to_string();
+
+    conn.execute(
+        "INSERT INTO tasks (id, title, description, status, priority, project_id,
+          assignee, recurrence, due_date, completed_at, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        params![
+            next_task_id,
+            &task.title,
+            task.description.as_deref(),
+            TaskStatus::Todo.as_str(),
+            task.priority.as_str(),
+            task.project_id.as_deref(),
+            task.assignee.as_deref(),
+            recurrence.as_str(),
+            next_due_date.map(|d| d.to_rfc3339()),
+            Option::<String>::None,
+            now.to_rfc3339(),
+            now.to_rfc3339(),
+        ],
+    )?;
+
+    for tag in &task.tags {
+        conn.execute(
+            "INSERT OR IGNORE INTO task_tags (task_id, tag) VALUES (?1, ?2)",
+            params![next_task_id, tag],
+        )?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct TaskStatistics {
     pub total: u32,
@@ -523,4 +606,62 @@ pub struct TaskStatistics {
     pub done: u32,
     pub overdue: u32,
     pub critical: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, TimeZone};
+
+    fn end_of_day_utc(year: i32, month: u32, day: u32) -> DateTime<Utc> {
+        let date = NaiveDate::from_ymd_opt(year, month, day).unwrap();
+        Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
+    }
+
+    #[test]
+    fn completing_recurring_task_creates_next_occurrence() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = TaskRepository::new(&db);
+
+        let original = repo
+            .create(CreateTaskRequest {
+                title: "Pay rent".to_string(),
+                description: Some("Monthly recurring bill".to_string()),
+                priority: Some(TaskPriority::High),
+                project_id: None,
+                assignee: Some("alex".to_string()),
+                tags: Some(vec!["finance".to_string()]),
+                recurrence: Some(TaskRecurrence::Monthly),
+                due_date: Some(end_of_day_utc(2026, 5, 31)),
+            })
+            .unwrap();
+
+        let completed = repo
+            .update(
+                &original.id,
+                UpdateTaskRequest {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(completed.status, TaskStatus::Done);
+
+        let tasks = repo.list(&TaskFilter::default()).unwrap();
+        assert_eq!(tasks.len(), 2);
+
+        let successor = tasks
+            .into_iter()
+            .find(|task| task.id != original.id)
+            .unwrap();
+
+        assert_eq!(successor.status, TaskStatus::Todo);
+        assert_eq!(successor.title, original.title);
+        assert_eq!(successor.tags, vec!["finance".to_string()]);
+        assert_eq!(successor.recurrence, Some(TaskRecurrence::Monthly));
+        assert_eq!(successor.assignee.as_deref(), Some("alex"));
+        assert_eq!(successor.due_date, Some(end_of_day_utc(2026, 6, 30)));
+    }
 }

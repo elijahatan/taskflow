@@ -1,7 +1,7 @@
 use colored::*;
 use prettytable::{format, row, Cell, Row, Table};
 
-use crate::models::task::{Task, TaskPriority, TaskStatus};
+use crate::models::task::{Task, TaskPriority, TaskRecurrence, TaskStatus};
 
 pub fn priority_colored(p: &TaskPriority) -> ColoredString {
     match p {
@@ -22,6 +22,15 @@ pub fn status_colored(s: &TaskStatus) -> ColoredString {
     }
 }
 
+pub fn recurrence_colored(r: &TaskRecurrence) -> ColoredString {
+    match r {
+        TaskRecurrence::Daily => "daily".blue(),
+        TaskRecurrence::Weekly => "weekly".blue(),
+        TaskRecurrence::Monthly => "monthly".blue(),
+        TaskRecurrence::Yearly => "yearly".blue(),
+    }
+}
+
 pub fn render_task_table(tasks: &[Task]) {
     if tasks.is_empty() {
         println!("{}", "No tasks found.".dimmed());
@@ -36,6 +45,7 @@ pub fn render_task_table(tasks: &[Task]) {
         b -> "Title",
         b -> "Status",
         b -> "Priority",
+        b -> "Repeat",
         b -> "Due",
         b -> "Tags",
     ]);
@@ -59,6 +69,11 @@ pub fn render_task_table(tasks: &[Task]) {
             }
             None => "-".dimmed().to_string(),
         };
+        let repeat_str = task
+            .recurrence
+            .as_ref()
+            .map(|r| recurrence_colored(r).to_string())
+            .unwrap_or_else(|| "-".dimmed().to_string());
 
         let tags_str = if task.tags.is_empty() {
             String::new()
@@ -77,6 +92,7 @@ pub fn render_task_table(tasks: &[Task]) {
             Cell::new(&title),
             Cell::new(&status_colored(&task.status).to_string()),
             Cell::new(&priority_colored(&task.priority).to_string()),
+            Cell::new(&repeat_str),
             Cell::new(&due_str),
             Cell::new(&tags_str),
         ]));
@@ -102,6 +118,13 @@ pub fn render_task_detail(task: &Task) {
         "Priority:".dimmed(),
         priority_colored(&task.priority)
     );
+    if let Some(recurrence) = &task.recurrence {
+        println!(
+            "  {:12} {}",
+            "Repeat:".dimmed(),
+            recurrence_colored(recurrence)
+        );
+    }
 
     if let Some(desc) = &task.description {
         println!("  {:12} {}", "Description:".dimmed(), desc);
@@ -181,6 +204,7 @@ pub fn error(msg: &str) {
     eprintln!("{} {}", "✗".red().bold(), msg);
 }
 
+#[allow(dead_code)]
 pub fn warn(msg: &str) {
     println!("{} {}", "⚠".yellow().bold(), msg);
 }

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use log::{info, warn};
-use std::io::Read;
 use tiny_http::{Method, Request, Response};
 
 use super::handlers;

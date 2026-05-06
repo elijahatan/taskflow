@@ -4,7 +4,7 @@ pub mod task_repo;
 
 use anyhow::Result;
 use log::info;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -31,6 +31,7 @@ impl Database {
         Ok(db)
     }
 
+    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
@@ -59,30 +60,4 @@ impl Database {
             Ok(())
         })
     }
-
-    pub fn stats(&self) -> Result<DbStats> {
-        self.with_conn(|conn| {
-            let task_count: u32 =
-                conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
-            let project_count: u32 =
-                conn.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
-            let done_count: u32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE status = 'done'",
-                [],
-                |row| row.get(0),
-            )?;
-            Ok(DbStats {
-                task_count,
-                project_count,
-                done_count,
-            })
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct DbStats {
-    pub task_count: u32,
-    pub project_count: u32,
-    pub done_count: u32,
 }

@@ -49,6 +49,7 @@ static MIGRATIONS: &[(u32, &str)] = &[
     (2, MIGRATION_002_TAGS),
     (3, MIGRATION_003_INDEXES),
     (4, MIGRATION_004_DEPENDENCIES),
+    (5, MIGRATION_005_RECURRENCE),
 ];
 
 const MIGRATION_001_INITIAL: &str = "
@@ -119,6 +120,14 @@ CREATE INDEX IF NOT EXISTS idx_task_dependencies_task_id
     ON task_dependencies(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on
     ON task_dependencies(depends_on_task_id);
+
+COMMIT;
+";
+
+const MIGRATION_005_RECURRENCE: &str = "
+BEGIN;
+
+ALTER TABLE tasks ADD COLUMN recurrence TEXT;
 
 COMMIT;
 ";

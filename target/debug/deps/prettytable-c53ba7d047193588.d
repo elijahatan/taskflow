@@ -1,0 +1,10 @@
+/Users/fabianvasquez/Documents/taskflow/target/debug/deps/prettytable-c53ba7d047193588.d: /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/lib.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/cell.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/format.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/row.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/utils.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/csv.rs
+
+/Users/fabianvasquez/Documents/taskflow/target/debug/deps/libprettytable-c53ba7d047193588.rmeta: /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/lib.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/cell.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/format.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/row.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/utils.rs /Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/csv.rs
+
+/Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/lib.rs:
+/Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/cell.rs:
+/Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/format.rs:
+/Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/row.rs:
+/Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/utils.rs:
+/Users/fabianvasquez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prettytable-rs-0.10.0/src/csv.rs:

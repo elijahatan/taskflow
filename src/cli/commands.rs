@@ -8,7 +8,7 @@ use crate::db::task_repo::TaskRepository;
 use crate::db::Database;
 use crate::models::project::CreateProjectRequest;
 use crate::models::task::{
-    CreateTaskRequest, TaskFilter, TaskPriority, TaskStatus, UpdateTaskRequest,
+    CreateTaskRequest, TaskFilter, TaskPriority, TaskRecurrence, TaskStatus, UpdateTaskRequest,
 };
 
 fn parse_tags(tags: Option<String>) -> Vec<String> {
@@ -28,6 +28,13 @@ fn parse_due_date(s: &str) -> Result<DateTime<Utc>> {
         .and_hms_opt(23, 59, 59)
         .ok_or_else(|| anyhow::anyhow!("Invalid date components"))?;
     Ok(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
+}
+
+fn parse_recurrence(s: &str) -> Result<Option<TaskRecurrence>> {
+    if s.eq_ignore_ascii_case("none") {
+        return Ok(None);
+    }
+    Ok(Some(TaskRecurrence::from_str(s)?))
 }
 
 fn resolve_task_id(db: &Database, partial: &str) -> Result<String> {
@@ -59,10 +66,16 @@ pub async fn task_add(
     project: Option<String>,
     assignee: Option<String>,
     tags: Option<String>,
+    repeat: Option<String>,
     due: Option<String>,
 ) -> Result<()> {
     let priority = TaskPriority::from_str(&priority)?;
     let due_date = due.as_deref().map(parse_due_date).transpose()?;
+    let recurrence = repeat
+        .as_deref()
+        .map(parse_recurrence)
+        .transpose()?
+        .flatten();
 
     let req = CreateTaskRequest {
         title,
@@ -71,6 +84,7 @@ pub async fn task_add(
         project_id: project,
         assignee,
         tags: Some(parse_tags(tags)),
+        recurrence,
         due_date,
     };
 
@@ -185,6 +199,7 @@ pub async fn task_update(
     priority: Option<String>,
     assignee: Option<String>,
     tags: Option<String>,
+    repeat: Option<String>,
     due: Option<String>,
 ) -> Result<()> {
     let full_id = resolve_task_id(db, id)?;
@@ -197,6 +212,7 @@ pub async fn task_update(
             .transpose()?,
         assignee,
         tags: tags.map(|t| parse_tags(Some(t))),
+        recurrence: repeat.as_deref().map(parse_recurrence).transpose()?,
         due_date: due.as_deref().map(parse_due_date).transpose()?,
         ..Default::default()
     };

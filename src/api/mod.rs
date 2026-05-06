@@ -7,8 +7,6 @@ use log::info;
 
 use crate::db::Database;
 
-pub use router::handle_request;
-
 pub async fn serve(host: &str, port: u16, db: Database) -> Result<()> {
     let addr = format!("{}:{}", host, port);
 

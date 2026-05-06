@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Months, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -31,15 +31,6 @@ impl TaskPriority {
                 "Unknown priority: '{}'. Use: low, medium, high, critical",
                 s
             )),
-        }
-    }
-
-    pub fn sort_order(&self) -> u8 {
-        match self {
-            TaskPriority::Critical => 0,
-            TaskPriority::High => 1,
-            TaskPriority::Medium => 2,
-            TaskPriority::Low => 3,
         }
     }
 }
@@ -109,6 +100,54 @@ impl Default for TaskStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskRecurrence {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+impl TaskRecurrence {
+    pub fn as_str(&self) -> &str {
+        match self {
+            TaskRecurrence::Daily => "daily",
+            TaskRecurrence::Weekly => "weekly",
+            TaskRecurrence::Monthly => "monthly",
+            TaskRecurrence::Yearly => "yearly",
+        }
+    }
+
+    pub fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s.to_lowercase().as_str() {
+            "daily" => Ok(TaskRecurrence::Daily),
+            "weekly" => Ok(TaskRecurrence::Weekly),
+            "monthly" => Ok(TaskRecurrence::Monthly),
+            "yearly" | "annual" => Ok(TaskRecurrence::Yearly),
+            _ => Err(anyhow::anyhow!(
+                "Unknown recurrence: '{}'. Use: daily, weekly, monthly, yearly",
+                s
+            )),
+        }
+    }
+
+    pub fn next_due_date(&self, due_date: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        match self {
+            TaskRecurrence::Daily => Some(due_date + chrono::Duration::days(1)),
+            TaskRecurrence::Weekly => Some(due_date + chrono::Duration::weeks(1)),
+            TaskRecurrence::Monthly => due_date.checked_add_months(Months::new(1)),
+            TaskRecurrence::Yearly => due_date.checked_add_months(Months::new(12)),
+        }
+    }
+}
+
+impl fmt::Display for TaskRecurrence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Core Task entity — the primary domain object
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -122,6 +161,7 @@ pub struct Task {
     pub tags: Vec<String>,
     pub blocked_by: Vec<String>,
     pub blocks: Vec<String>,
+    pub recurrence: Option<TaskRecurrence>,
     pub due_date: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -129,13 +169,6 @@ pub struct Task {
 }
 
 impl Task {
-    /// Business rule: mark task as done
-    pub fn complete(&mut self) {
-        self.status = TaskStatus::Done;
-        self.completed_at = Some(Utc::now());
-        self.updated_at = Utc::now();
-    }
-
     /// Business rule: check if task is overdue
     pub fn is_overdue(&self) -> bool {
         if self.status.is_terminal() {
@@ -162,6 +195,7 @@ pub struct CreateTaskRequest {
     pub project_id: Option<String>,
     pub assignee: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub recurrence: Option<TaskRecurrence>,
     pub due_date: Option<DateTime<Utc>>,
 }
 
@@ -189,6 +223,7 @@ pub struct UpdateTaskRequest {
     pub project_id: Option<String>,
     pub assignee: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub recurrence: Option<Option<TaskRecurrence>>,
     pub due_date: Option<DateTime<Utc>>,
 }
 

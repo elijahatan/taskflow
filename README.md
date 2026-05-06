@@ -17,6 +17,7 @@
 - **Tag system** with multi-tag filtering
 - **Due date tracking** with overdue highlighting
 - **Dependency tracking** with blocker/dependent relationships and cycle prevention
+- **Recurring tasks** with daily / weekly / monthly / yearly schedules
 - **Config file** at `~/.taskflow/config.toml` with env-var overrides
 - **Structured logging** via `env_logger`
 
@@ -68,6 +69,7 @@ taskflow add "Refactor authentication module" \
   --priority high \
   --assignee alice \
   --tags "backend,security" \
+  --repeat weekly \
   --due 2025-12-31
 
 # List all tasks (table view)
@@ -92,7 +94,7 @@ taskflow unblock a1b2c3 --on d4e5f6
 taskflow done a1b2c3
 
 # Update fields
-taskflow update a1b2c3 --status in_progress --priority critical
+taskflow update a1b2c3 --status in_progress --priority critical --repeat monthly
 
 # Delete (with confirmation)
 taskflow delete a1b2c3
@@ -149,6 +151,11 @@ taskflow serve --host 0.0.0.0 --port 8765
 curl -X POST http://localhost:8765/api/v1/tasks \
   -H 'Content-Type: application/json' \
   -d '{"title":"Deploy v2","priority":"high","tags":["ops"]}'
+
+# Create a recurring task
+curl -X POST http://localhost:8765/api/v1/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Send weekly report","recurrence":"weekly"}'
 
 # List with filter
 curl 'http://localhost:8765/api/v1/tasks?status=todo&priority=high'
@@ -214,6 +221,7 @@ CREATE TABLE tasks (
   priority     TEXT NOT NULL DEFAULT 'medium',
   project_id   TEXT REFERENCES projects(id) ON DELETE SET NULL,
   assignee     TEXT,
+  recurrence   TEXT,
   due_date     TEXT,
   completed_at TEXT,
   created_at   TEXT NOT NULL,

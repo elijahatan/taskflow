@@ -44,6 +44,7 @@ pub enum Command {
         project: Option<String>,
         assignee: Option<String>,
         tags: Option<String>,
+        repeat: Option<String>,
         due: Option<String>,
     },
     List {
@@ -78,6 +79,7 @@ pub enum Command {
         priority: Option<String>,
         assignee: Option<String>,
         tags: Option<String>,
+        repeat: Option<String>,
         due: Option<String>,
     },
     Delete {
@@ -131,6 +133,7 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
                 project: args.opt_value_from_str("--project")?,
                 assignee: args.opt_value_from_str(["-a", "--assignee"])?,
                 tags: args.opt_value_from_str(["-t", "--tags"])?,
+                repeat: args.opt_value_from_str("--repeat")?,
                 due: args.opt_value_from_str("--due")?,
                 title,
             }
@@ -195,6 +198,7 @@ pub fn parse_args() -> Result<(GlobalOpts, Command)> {
                 priority: args.opt_value_from_str(["-p", "--priority"])?,
                 assignee: args.opt_value_from_str(["-a", "--assignee"])?,
                 tags: args.opt_value_from_str("--tags")?,
+                repeat: args.opt_value_from_str("--repeat")?,
                 due: args.opt_value_from_str("--due")?,
             }
         }
@@ -277,6 +281,7 @@ pub async fn run(cmd: Command, db: &Database) -> Result<()> {
             project,
             assignee,
             tags,
+            repeat,
             due,
         } => {
             commands::task_add(
@@ -287,6 +292,7 @@ pub async fn run(cmd: Command, db: &Database) -> Result<()> {
                 project,
                 assignee,
                 tags,
+                repeat,
                 due,
             )
             .await
@@ -318,8 +324,14 @@ pub async fn run(cmd: Command, db: &Database) -> Result<()> {
             priority,
             assignee,
             tags,
+            repeat,
             due,
-        } => commands::task_update(db, &id, title, status, priority, assignee, tags, due).await,
+        } => {
+            commands::task_update(
+                db, &id, title, status, priority, assignee, tags, repeat, due,
+            )
+            .await
+        }
         Command::Delete { id, yes } => commands::task_delete(db, &id, yes).await,
         Command::ProjectAdd {
             name,
