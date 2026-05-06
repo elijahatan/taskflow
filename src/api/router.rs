@@ -87,6 +87,9 @@ fn route(method: &Method, path: &str, query: &str, body: &str, db: &Database) ->
         (Method::Post, ["api", "v1", "tasks"]) => handlers::create_task(body, db),
 
         (Method::Get, ["api", "v1", "tasks", id]) => handlers::get_task(id, db),
+        (Method::Get, ["api", "v1", "tasks", id, "activity"]) => {
+            handlers::get_task_activity(id, db)
+        }
         (Method::Put, ["api", "v1", "tasks", id]) => handlers::update_task(id, body, db),
         (Method::Delete, ["api", "v1", "tasks", id]) => handlers::delete_task(id, db),
 

@@ -5,7 +5,7 @@ use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 use crate::models::task::{
-    CreateTaskRequest, Task, TaskFilter, TaskPriority, TaskRecurrence, TaskStatus,
+    CreateTaskRequest, Task, TaskActivity, TaskFilter, TaskPriority, TaskRecurrence, TaskStatus,
     UpdateTaskRequest,
 };
 
@@ -34,6 +34,7 @@ impl<'a> TaskRepository<'a> {
             tags: req.tags.unwrap_or_default(),
             blocked_by: Vec::new(),
             blocks: Vec::new(),
+            activities: Vec::new(),
             recurrence: req.recurrence,
             due_date: req.due_date,
             completed_at: None,
@@ -68,6 +69,7 @@ impl<'a> TaskRepository<'a> {
                     params![task.id, tag],
                 )?;
             }
+            append_activity(conn, &task.id, "created", None)?;
 
             debug!("Created task {}: {}", task.id, task.title);
             Ok(task)
@@ -89,6 +91,7 @@ impl<'a> TaskRepository<'a> {
                     task.tags = get_tags_for_task(conn, &task.id)?;
                     task.blocked_by = get_dependency_ids(conn, &task.id)?;
                     task.blocks = get_dependent_ids(conn, &task.id)?;
+                    task.activities = get_activity_for_task(conn, &task.id)?;
                     Ok(Some(task))
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -184,6 +187,7 @@ impl<'a> TaskRepository<'a> {
                 task.tags = get_tags_for_task(conn, &task.id)?;
                 task.blocked_by = get_dependency_ids(conn, &task.id)?;
                 task.blocks = get_dependent_ids(conn, &task.id)?;
+                task.activities = Vec::new();
                 result.push(task);
             }
 
@@ -207,18 +211,25 @@ impl<'a> TaskRepository<'a> {
             let existing = get_task_by_id(conn, id)?
                 .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", id))?;
             let now = Utc::now().to_rfc3339();
+            let mut changes = Vec::new();
 
             if let Some(title) = &req.title {
                 conn.execute(
                     "UPDATE tasks SET title=?1, updated_at=?2 WHERE id=?3",
                     params![title, now, id],
                 )?;
+                if existing.title != *title {
+                    changes.push(format!("title: '{}' -> '{}'", existing.title, title));
+                }
             }
             if let Some(desc) = &req.description {
                 conn.execute(
                     "UPDATE tasks SET description=?1, updated_at=?2 WHERE id=?3",
                     params![desc, now, id],
                 )?;
+                if existing.description != Some(desc.clone()) {
+                    changes.push("description updated".to_string());
+                }
             }
             if let Some(status) = &req.status {
                 let completed_at = if *status == TaskStatus::Done {
@@ -230,36 +241,58 @@ impl<'a> TaskRepository<'a> {
                     "UPDATE tasks SET status=?1, completed_at=?2, updated_at=?3 WHERE id=?4",
                     params![status.as_str(), completed_at, now, id],
                 )?;
+                if existing.status != *status {
+                    changes.push(format!("status: {} -> {}", existing.status, status));
+                }
             }
             if let Some(priority) = &req.priority {
                 conn.execute(
                     "UPDATE tasks SET priority=?1, updated_at=?2 WHERE id=?3",
                     params![priority.as_str(), now, id],
                 )?;
+                if existing.priority != *priority {
+                    changes.push(format!("priority: {} -> {}", existing.priority, priority));
+                }
             }
             if let Some(assignee) = &req.assignee {
                 conn.execute(
                     "UPDATE tasks SET assignee=?1, updated_at=?2 WHERE id=?3",
                     params![assignee, now, id],
                 )?;
+                if existing.assignee != Some(assignee.clone()) {
+                    changes.push(format!("assignee set to {}", assignee));
+                }
             }
             if let Some(project_id) = &req.project_id {
                 conn.execute(
                     "UPDATE tasks SET project_id=?1, updated_at=?2 WHERE id=?3",
                     params![project_id, now, id],
                 )?;
+                if existing.project_id != Some(project_id.clone()) {
+                    changes.push(format!("project set to {}", project_id));
+                }
             }
             if let Some(recurrence) = &req.recurrence {
                 conn.execute(
                     "UPDATE tasks SET recurrence=?1, updated_at=?2 WHERE id=?3",
                     params![recurrence.as_ref().map(|r| r.as_str().to_string()), now, id],
                 )?;
+                if existing.recurrence != *recurrence {
+                    let value = recurrence
+                        .as_ref()
+                        .map(|r| r.to_string())
+                        .unwrap_or_else(|| "none".to_string());
+                    changes.push(format!("recurrence set to {}", value));
+                }
             }
             if let Some(due_date) = &req.due_date {
                 conn.execute(
                     "UPDATE tasks SET due_date=?1, updated_at=?2 WHERE id=?3",
                     params![due_date.to_rfc3339(), now, id],
                 )?;
+                if existing.due_date != Some(*due_date) {
+                    changes.push(format!("due date set to {}", due_date.format("%Y-%m-%d")));
+                }
             }
             if let Some(tags) = &req.tags {
                 conn.execute("DELETE FROM task_tags WHERE task_id=?1", params![id])?;
@@ -269,11 +302,18 @@ impl<'a> TaskRepository<'a> {
                         params![id, tag],
                     )?;
                 }
+                if existing.tags != *tags {
+                    changes.push(format!("tags set to {}", tags.join(", ")));
+                }
             }
 
+            if !changes.is_empty() {
+                append_activity(conn, id, "updated", Some(changes.join("; ")))?;
+            }
             sync_task_status_with_dependencies(conn, id)?;
             sync_dependents_for_task(conn, id)?;
             if matches!(req.status, Some(TaskStatus::Done)) && existing.status != TaskStatus::Done {
+                append_activity(conn, id, "completed", None)?;
                 create_next_recurring_task(conn, &existing)?;
             }
 
@@ -334,6 +374,12 @@ impl<'a> TaskRepository<'a> {
                 params![task_id, depends_on_task_id],
             )?;
 
+            append_activity(
+                conn,
+                task_id,
+                "dependency_added",
+                Some(format!("blocked by {}", depends_on_task_id)),
+            )?;
             sync_task_status_with_dependencies(conn, task_id)?;
             Ok(())
         })?;
@@ -357,6 +403,12 @@ impl<'a> TaskRepository<'a> {
                 return Err(anyhow::anyhow!("Dependency does not exist"));
             }
 
+            append_activity(
+                conn,
+                task_id,
+                "dependency_removed",
+                Some(format!("unblocked from {}", depends_on_task_id)),
+            )?;
             sync_task_status_with_dependencies(conn, task_id)?;
             Ok(())
         })?;
@@ -368,6 +420,11 @@ impl<'a> TaskRepository<'a> {
     pub fn has_unfinished_dependencies(&self, task_id: &str) -> Result<bool> {
         self.db
             .with_conn(|conn| has_unfinished_dependencies(conn, task_id))
+    }
+
+    pub fn activity(&self, task_id: &str) -> Result<Vec<TaskActivity>> {
+        self.db
+            .with_conn(|conn| get_activity_for_task(conn, task_id))
     }
 }
 
@@ -395,6 +452,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         tags: Vec::new(),       // filled in separately
         blocked_by: Vec::new(), // filled in separately
         blocks: Vec::new(),     // filled in separately
+        activities: Vec::new(), // filled in separately
         recurrence: recurrence_str
             .map(|s| TaskRecurrence::from_str(&s))
             .transpose()
@@ -438,6 +496,7 @@ fn get_task_by_id(conn: &Connection, id: &str) -> Result<Option<Task>> {
             task.tags = get_tags_for_task(conn, &task.id)?;
             task.blocked_by = get_dependency_ids(conn, &task.id)?;
             task.blocks = get_dependent_ids(conn, &task.id)?;
+            task.activities = get_activity_for_task(conn, &task.id)?;
             Ok(Some(task))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -464,6 +523,56 @@ fn get_dependency_ids(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
         .query_map(params![task_id], |row| row.get(0))?
         .collect::<Result<Vec<String>, _>>()?;
     Ok(ids)
+}
+
+fn get_activity_for_task(conn: &Connection, task_id: &str) -> Result<Vec<TaskActivity>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, action, details, created_at
+           FROM task_activity
+          WHERE task_id=?1
+          ORDER BY created_at DESC",
+    )?;
+    let items = stmt
+        .query_map(params![task_id], |row| {
+            let created_at_str: String = row.get(4)?;
+            Ok(TaskActivity {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                action: row.get(2)?,
+                details: row.get(3)?,
+                created_at: DateTime::parse_from_rfc3339(&created_at_str)
+                    .map_err(|e| {
+                        rusqlite::Error::InvalidColumnType(
+                            4,
+                            e.to_string(),
+                            rusqlite::types::Type::Text,
+                        )
+                    })?
+                    .with_timezone(&Utc),
+            })
+        })?
+        .collect::<Result<Vec<TaskActivity>, _>>()?;
+    Ok(items)
+}
+
+fn append_activity(
+    conn: &Connection,
+    task_id: &str,
+    action: &str,
+    details: Option<String>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO task_activity (id, task_id, action, details, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            Uuid::new_v4().to_string(),
+            task_id,
+            action,
+            details,
+            Utc::now().to_rfc3339(),
+        ],
+    )?;
+    Ok(())
 }
 
 fn get_dependent_ids(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
@@ -539,11 +648,23 @@ fn sync_task_status_with_dependencies(conn: &Connection, task_id: &str) -> Resul
                 "UPDATE tasks SET status='blocked', updated_at=?1 WHERE id=?2",
                 params![now, task_id],
             )?;
+            append_activity(
+                conn,
+                task_id,
+                "blocked",
+                Some("waiting on dependencies".to_string()),
+            )?;
         }
     } else if status == "blocked" {
         conn.execute(
             "UPDATE tasks SET status='todo', updated_at=?1 WHERE id=?2",
             params![now, task_id],
+        )?;
+        append_activity(
+            conn,
+            task_id,
+            "unblocked",
+            Some("dependencies resolved".to_string()),
         )?;
     }
 
@@ -594,6 +715,19 @@ fn create_next_recurring_task(conn: &Connection, task: &Task) -> Result<()> {
             params![next_task_id, tag],
         )?;
     }
+
+    append_activity(
+        conn,
+        task.id.as_str(),
+        "recurrence_spawned",
+        Some(format!("created next occurrence {}", next_task_id)),
+    )?;
+    append_activity(
+        conn,
+        &next_task_id,
+        "created",
+        Some(format!("spawned from recurring task {}", task.id)),
+    )?;
 
     Ok(())
 }
@@ -663,5 +797,67 @@ mod tests {
         assert_eq!(successor.recurrence, Some(TaskRecurrence::Monthly));
         assert_eq!(successor.assignee.as_deref(), Some("alex"));
         assert_eq!(successor.due_date, Some(end_of_day_utc(2026, 6, 30)));
+    }
+
+    #[test]
+    fn task_activity_history_records_key_events() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = TaskRepository::new(&db);
+
+        let blocker = repo
+            .create(CreateTaskRequest {
+                title: "Prepare data".to_string(),
+                description: None,
+                priority: None,
+                project_id: None,
+                assignee: None,
+                tags: None,
+                recurrence: None,
+                due_date: None,
+            })
+            .unwrap();
+
+        let task = repo
+            .create(CreateTaskRequest {
+                title: "Publish report".to_string(),
+                description: None,
+                priority: None,
+                project_id: None,
+                assignee: None,
+                tags: Some(vec!["reporting".to_string()]),
+                recurrence: None,
+                due_date: None,
+            })
+            .unwrap();
+
+        repo.add_dependency(&task.id, &blocker.id).unwrap();
+        repo.update(
+            &task.id,
+            UpdateTaskRequest {
+                priority: Some(TaskPriority::High),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        repo.update(
+            &blocker.id,
+            UpdateTaskRequest {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let activity = repo.activity(&task.id).unwrap();
+        let actions = activity
+            .iter()
+            .map(|item| item.action.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(actions.contains(&"created"));
+        assert!(actions.contains(&"dependency_added"));
+        assert!(actions.contains(&"blocked"));
+        assert!(actions.contains(&"updated"));
+        assert!(actions.contains(&"unblocked"));
     }
 }

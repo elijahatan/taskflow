@@ -87,6 +87,21 @@ pub fn get_task(id: &str, db: &Database) -> ApiResponse {
     }
 }
 
+pub fn get_task_activity(id: &str, db: &Database) -> ApiResponse {
+    let repo = TaskRepository::new(db);
+    if let Ok(None) = repo.get_by_id(id) {
+        return ApiResponse::not_found(&format!("Task '{}' not found", id));
+    }
+
+    match repo.activity(id) {
+        Ok(items) => match serde_json::to_string(&items) {
+            Ok(json) => ApiResponse::ok(json),
+            Err(e) => ApiResponse::internal_error(&e.to_string()),
+        },
+        Err(e) => ApiResponse::internal_error(&e.to_string()),
+    }
+}
+
 pub fn update_task(id: &str, body: &str, db: &Database) -> ApiResponse {
     let req: UpdateTaskRequest = match serde_json::from_str(body) {
         Ok(r) => r,

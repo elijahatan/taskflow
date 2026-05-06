@@ -148,6 +148,15 @@ impl fmt::Display for TaskRecurrence {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskActivity {
+    pub id: String,
+    pub task_id: String,
+    pub action: String,
+    pub details: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
 /// Core Task entity — the primary domain object
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -161,6 +170,7 @@ pub struct Task {
     pub tags: Vec<String>,
     pub blocked_by: Vec<String>,
     pub blocks: Vec<String>,
+    pub activities: Vec<TaskActivity>,
     pub recurrence: Option<TaskRecurrence>,
     pub due_date: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,

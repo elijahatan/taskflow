@@ -192,6 +192,19 @@ pub fn render_task_detail(task: &Task) {
         "Updated:".dimmed(),
         task.updated_at.format("%Y-%m-%d %H:%M UTC")
     );
+    if !task.activities.is_empty() {
+        println!("{}", "━".repeat(60).dimmed());
+        println!("  {}", "Activity".bold());
+        for activity in &task.activities {
+            let ts = activity.created_at.format("%Y-%m-%d %H:%M").to_string();
+            match &activity.details {
+                Some(details) => {
+                    println!("  {}  {}  {}", ts.dimmed(), activity.action.bold(), details)
+                }
+                None => println!("  {}  {}", ts.dimmed(), activity.action.bold()),
+            }
+        }
+    }
     println!("{}", "━".repeat(60).dimmed());
     println!();
 }

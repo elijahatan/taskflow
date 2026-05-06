@@ -18,6 +18,7 @@
 - **Due date tracking** with overdue highlighting
 - **Dependency tracking** with blocker/dependent relationships and cycle prevention
 - **Recurring tasks** with daily / weekly / monthly / yearly schedules
+- **Task activity history** for create/update/block/complete lifecycle events
 - **Config file** at `~/.taskflow/config.toml` with env-var overrides
 - **Structured logging** via `env_logger`
 
@@ -133,6 +134,7 @@ taskflow serve --host 0.0.0.0 --port 8765
 | GET | `/api/v1/tasks` | List tasks (supports query params) |
 | POST | `/api/v1/tasks` | Create a task |
 | GET | `/api/v1/tasks/:id` | Get a task |
+| GET | `/api/v1/tasks/:id/activity` | Get task activity history |
 | PUT | `/api/v1/tasks/:id` | Update a task |
 | DELETE | `/api/v1/tasks/:id` | Delete a task |
 | POST | `/api/v1/tasks/:id/done` | Mark a task done |
@@ -167,6 +169,9 @@ curl -X POST http://localhost:8765/api/v1/tasks/<id>/done
 curl -X POST http://localhost:8765/api/v1/tasks/<id>/dependencies \
   -H 'Content-Type: application/json' \
   -d '{"depends_on_task_id":"<blocking-id>"}'
+
+# Fetch activity history
+curl http://localhost:8765/api/v1/tasks/<id>/activity
 ```
 
 ---
@@ -240,6 +245,15 @@ CREATE TABLE task_dependencies (
   task_id            TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   PRIMARY KEY (task_id, depends_on_task_id)
+);
+
+-- Task activity history
+CREATE TABLE task_activity (
+  id         TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  action     TEXT NOT NULL,
+  details    TEXT,
+  created_at TEXT NOT NULL
 );
 ```
 

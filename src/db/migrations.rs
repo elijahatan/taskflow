@@ -50,6 +50,7 @@ static MIGRATIONS: &[(u32, &str)] = &[
     (3, MIGRATION_003_INDEXES),
     (4, MIGRATION_004_DEPENDENCIES),
     (5, MIGRATION_005_RECURRENCE),
+    (6, MIGRATION_006_TASK_ACTIVITY),
 ];
 
 const MIGRATION_001_INITIAL: &str = "
@@ -128,6 +129,23 @@ const MIGRATION_005_RECURRENCE: &str = "
 BEGIN;
 
 ALTER TABLE tasks ADD COLUMN recurrence TEXT;
+
+COMMIT;
+";
+
+const MIGRATION_006_TASK_ACTIVITY: &str = "
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS task_activity (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    action     TEXT NOT NULL,
+    details    TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_activity_task_id_created_at
+    ON task_activity(task_id, created_at DESC);
 
 COMMIT;
 ";
